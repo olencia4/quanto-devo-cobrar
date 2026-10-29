@@ -1,6 +1,16 @@
 
 "use strict";
 
+// Ligação ao Supabase
+const SUPABASE_URL = "https://bndstqeslspkzmfinmia.supabase.co";
+
+const SUPABASE_KEY = "sb_publishable_NPjGuXeBFH0JwMF6lP--pg_HfEkVpaX";
+
+const supabaseClient = window.supabase.createClient(
+    SUPABASE_URL,
+    SUPABASE_KEY
+);
+
 const form = document.getElementById("priceForm");
 const results = document.getElementById("results");
 const formError = document.getElementById("formError");
@@ -1115,3 +1125,157 @@ exportHistoryButton.addEventListener(
   "click",
   exportHistoryToCSV
 );
+
+
+/* ========================================
+   AUTENTICAÇÃO COM SUPABASE
+======================================== */
+
+const authForm = document.getElementById("authForm");
+const authEmail = document.getElementById("authEmail");
+const authPassword = document.getElementById("authPassword");
+const authMessage = document.getElementById("authMessage");
+const signUpButton = document.getElementById("signUpButton");
+const loggedInArea = document.getElementById("loggedInArea");
+const loggedInEmail = document.getElementById("loggedInEmail");
+const signOutButton = document.getElementById("signOutButton");
+
+function showAuthMessage(message, isError = false) {
+    if (!authMessage) return;
+
+    authMessage.textContent = message;
+    authMessage.style.color = isError ? "#b42318" : "#18794e";
+}
+
+function updateAuthInterface(user) {
+    const authSection = document.getElementById("authSection");
+    const signInButton = document.getElementById("signInButton");
+
+    if (user) {
+        if (loggedInEmail) {
+            loggedInEmail.textContent = user.email || "";
+        }
+
+        if (loggedInArea) {
+            loggedInArea.hidden = false;
+        }
+
+        if (authForm) {
+            authForm.hidden = true;
+        }
+
+        showAuthMessage("Sessão iniciada com sucesso.");
+    } else {
+        if (loggedInArea) {
+            loggedInArea.hidden = true;
+        }
+
+        if (authForm) {
+            authForm.hidden = false;
+        }
+
+        if (signInButton) {
+            signInButton.disabled = false;
+        }
+
+        if (authSection) {
+            showAuthMessage("Inicia sessão ou cria uma conta.");
+        }
+    }
+}
+
+if (authForm && signUpButton && window.supabase) {
+    authForm.addEventListener("submit", async function (event) {
+        event.preventDefault();
+
+        const email = authEmail.value.trim();
+        const password = authPassword.value;
+
+        showAuthMessage("A iniciar sessão...");
+
+        const { data, error } = await supabaseClient.auth.signInWithPassword({
+            email,
+            password
+        });
+
+        if (error) {
+            showAuthMessage(error.message, true);
+            return;
+        }
+
+        updateAuthInterface(data.user);
+        authForm.reset();
+    });
+
+    signUpButton.addEventListener("click", async function () {
+        const email = authEmail.value.trim();
+        const password = authPassword.value;
+
+        if (!email || !password) {
+            showAuthMessage(
+                "Preenche o e-mail e a palavra-passe antes de criar a conta.",
+                true
+            );
+            return;
+        }
+
+        if (password.length < 8) {
+            showAuthMessage(
+                "A palavra-passe deve ter pelo menos 8 caracteres.",
+                true
+            );
+            return;
+        }
+
+        showAuthMessage("A criar conta...");
+
+        const { data, error } = await supabaseClient.auth.signUp({
+    email,
+    password,
+    options: {
+        emailRedirectTo: "https://olencia4.github.io/quanto-devo-cobrar/"
+    }
+});
+
+        if (error) {
+            showAuthMessage(error.message, true);
+            return;
+        }
+
+        if (data.session) {
+            updateAuthInterface(data.user);
+            authForm.reset();
+        } else {
+            showAuthMessage(
+                "Conta criada. Verifica o teu e-mail para confirmar a conta antes de iniciar sessão."
+            );
+        }
+    });
+
+    if (signOutButton) {
+        signOutButton.addEventListener("click", async function () {
+            const { error } = await supabaseClient.auth.signOut();
+
+            if (error) {
+                showAuthMessage(error.message, true);
+                return;
+            }
+
+            updateAuthInterface(null);
+            showAuthMessage("Sessão terminada.");
+        });
+    }
+
+    supabaseClient.auth.getSession().then(({ data, error }) => {
+        if (error) {
+            showAuthMessage("Não foi possível verificar a sessão.", true);
+            return;
+        }
+
+        updateAuthInterface(data.session?.user ?? null);
+    });
+
+    supabaseClient.auth.onAuthStateChange((_event, session) => {
+        updateAuthInterface(session?.user ?? null);
+    });
+}

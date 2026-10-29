@@ -8,9 +8,56 @@
   <meta name="description" content="Calcula custos, preços de venda e lucros dos teus produtos e serviços em meticais.">
   <title>Quanto Devo Cobrar?</title>
   <link rel="stylesheet" href="style.css">
-  <script src="script.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="script.js" defer></script>
 </head>
 <body>
+
+
+<section id="authSection" class="auth-section">
+    <h2>A tua conta</h2>
+    <p>Cria uma conta ou inicia sessão para sincronizar o teu histórico.</p>
+
+    <form id="authForm">
+        <label for="authEmail">E-mail</label>
+        <input
+            type="email"
+            id="authEmail"
+            placeholder="teuemail@exemplo.com"
+            required
+        >
+
+        <label for="authPassword">Palavra-passe</label>
+        <input
+            type="password"
+            id="authPassword"
+            placeholder="Mínimo de 8 caracteres"
+            minlength="8"
+            required
+        >
+
+        <div class="auth-buttons">
+            <button type="submit" id="signInButton">
+                Iniciar sessão
+            </button>
+
+            <button type="button" id="signUpButton">
+                Criar conta
+            </button>
+        </div>
+
+        <p id="authMessage" role="status" aria-live="polite"></p>
+    </form>
+
+    <div id="loggedInArea" hidden>
+        <p>Conta: <span id="loggedInEmail"></span></p>
+        <button type="button" id="signOutButton">
+            Terminar sessão
+        </button>
+    </div>
+</section>
+
+
   <header class="topbar">
     <a class="brand" href="#" aria-label="Quanto Devo Cobrar, página inicial">
       <span class="brand-icon">Q</span>
