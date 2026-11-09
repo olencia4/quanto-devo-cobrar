@@ -1,489 +1,147 @@
-
 <!DOCTYPE html>
 <html lang="pt">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="theme-color" content="#12372b">
-  <meta name="description" content="Calcula custos, preços de venda e lucros dos teus produtos e serviços em meticais.">
+  <meta name="theme-color" content="#063f31">
+  <meta name="description" content="Calcula custos, preços e lucros de produtos, fabrico e prestação de serviços em meticais.">
   <title>Quanto Devo Cobrar?</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="script.js" defer></script>
+  <script src="script.js" defer></script>
 </head>
 <body>
-
-
-<section id="authSection" class="auth-section">
-    <h2>A tua conta</h2>
-    <p>Cria uma conta ou inicia sessão para sincronizar o teu histórico.</p>
-
-    <form id="authForm">
-        <label for="authEmail">E-mail</label>
-        <input
-            type="email"
-            id="authEmail"
-            placeholder="teuemail@exemplo.com"
-            required
-        >
-
-        <label for="authPassword">Palavra-passe</label>
-        <input
-            type="password"
-            id="authPassword"
-            placeholder="Mínimo de 8 caracteres"
-            minlength="8"
-            required
-        >
-
-        <div class="auth-buttons">
-            <button type="submit" id="signInButton">
-                Iniciar sessão
-            </button>
-
-            <button type="button" id="signUpButton">
-                Criar conta
-            </button>
-        </div>
-
-        <p id="authMessage" role="status" aria-live="polite"></p>
-    </form>
-
-    <div id="loggedInArea" hidden>
-        <p>Conta: <span id="loggedInEmail"></span></p>
-        <button type="button" id="signOutButton">
-            Terminar sessão
-        </button>
-    </div>
-</section>
-
-
   <header class="topbar">
-    <a class="brand" href="#" aria-label="Quanto Devo Cobrar, página inicial">
-      <span class="brand-icon">Q</span>
-      <span>Quanto Devo <strong>Cobrar?</strong></span>
+    <a class="brand" href="#inicio" aria-label="Quanto Devo Cobrar, página inicial">
+      <span class="brand-icon">Q</span><span>Quanto Devo <strong>Cobrar?</strong></span>
     </a>
-    <span class="country-label">Moçambique · MZN</span>
+    <nav class="top-nav">
+  <a href="#inicio">Início</a>
+  <a href="#calculadora">Calculadora</a>
+  <a href="#historico">Histórico</a>
+</nav>
+    <div class="top-actions">
+      <span class="country-label"><span class="country-dot"></span> Moçambique · MZN</span>
+      <details class="account-menu">
+        <summary id="accountToggle">A minha conta</summary>
+        <div class="account-popover" id="authSection">
+          <h2>A tua conta</h2><p>Inicia sessão para aceder à tua conta.</p>
+          <form id="authForm">
+            <label for="authEmail">E-mail</label><input type="email" id="authEmail" placeholder="teuemail@exemplo.com" required>
+            <label for="authPassword">Palavra-passe</label><input type="password" id="authPassword" placeholder="Mínimo de 8 caracteres" minlength="8" required>
+            <div class="auth-buttons"><button type="submit" id="signInButton">Iniciar sessão</button><button type="button" id="signUpButton">Criar conta</button></div>
+            <p id="authMessage" role="status" aria-live="polite"></p>
+          </form>
+          <div id="loggedInArea" hidden><p>Conta: <strong id="loggedInEmail"></strong></p><button type="button" id="signOutButton" class="secondary-button">Terminar sessão</button></div>
+        </div>
+      </details>
+    </div>
   </header>
 
-  <main class="container">
+  <main class="container" id="inicio">
     <section class="hero">
-      <span class="hero-label">A TUA FERRAMENTA DE NEGÓCIO</span>
-      <h1>Define o teu preço.<br><span>Conhece o teu lucro.</span></h1>
-      <p>
-        Calcula quanto deves cobrar pelos teus produtos
-        e serviços para cobrir os custos e obter lucro.
-      </p>
-      <div class="hero-points">
-        <span><span class="check">✓</span> Cálculo automático</span>
-        <span><span class="check">✓</span> Preços em meticais</span>
+      <div class="hero-copy">
+        <span class="hero-label"><span></span> A TUA FERRAMENTA DE NEGÓCIO</span>
+        <h1>Define o teu preço.<br><em>Conhece o teu lucro.</em></h1>
+        <p>Uma forma simples e profissional de calcular quanto cobrar, controlar os custos e proteger a margem do teu negócio.</p>
+        <div class="hero-points"><span><b>✓</b> Cálculo automático</span><span><b>✓</b> Conversão de moedas</span><span><b>✓</b> Resultados em meticais</span></div>
       </div>
+      <div class="hero-visual" aria-hidden="true"><div class="visual-orbit orbit-one"></div><div class="visual-orbit orbit-two"></div><div class="visual-card"><span class="visual-card-label">LUCRO ESTIMADO</span><strong>+ 35,8%</strong><div class="visual-bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><small>Mais clareza para decidir.</small></div><div class="visual-coin">MT</div></div>
     </section>
 
-    <div class="workspace">
+    <section class="workspace" id="calculadora">
       <section class="panel form-panel">
-        <form id="priceForm">
-        <div class="section-heading">
-          <div class="section-icon">01</div>
-          <div>
-            <h2>Dados do produto</h2>
-            <p>Preenche os campos para calcular o teu preço.</p>
-          </div>
-        </div>
-
-        
-          
-<div class="field">
-  <label for="calculationMode">O que pretendes fazer?</label>
-  <select id="calculationMode" name="calculationMode">
-    <option value="resale">Revender produtos comprados</option>
-    <option value="production">Fabricar os meus próprios produtos</option>
-  </select>
-  <small>
-    Escolhe se compras produtos prontos para revender ou se fabricas os teus próprios produtos.
-  </small>
-</div>
-
-<div class="field">
-  <label for="productName">Nome do produto ou serviço</label>
-  <input
-    id="productName"
-    name="productName"
-    type="text"
-    placeholder="Ex.: Cerveja, bolo, corte de cabelo"
-    maxlength="80"
-  >
-</div>
-
-
-<div id="productionFields" hidden>
-  <h3>Ingredientes e materiais utilizados</h3>
-  <p>
-    Regista o custo da quantidade de cada ingrediente ou material utilizado nesta produção.
-  </p>
-
-  
-<div id="ingredientsList">
-  <div class="ingredient-row">
-    <div class="field">
-      <label>Nome do ingrediente ou material</label>
-      <input
-        type="text"
-        class="ingredient-name"
-        placeholder="Ex.: Farinha"
-        maxlength="80"
-      >
-    </div>
-
-    <div class="field">
-      <label>Custo utilizado</label>
-      <input
-        type="number"
-        class="ingredient-cost"
-        min="0"
-        step="0.01"
-        placeholder="Ex.: 150"
-      >
-    </div>
-
-    <div class="field">
-      <label>Moeda</label>
-      <select class="ingredient-currency">
-        <option value="MZN">Metical (MZN)</option>
-        <option value="ZAR">Rand (ZAR)</option>
-        <option value="USD">Dólar (USD)</option>
-        <option value="EUR">Euro (EUR)</option>
-        <option value="GBP">Libra (GBP)</option>
-        <option value="CNY">Yuan (CNY)</option>
-      </select>
-    </div>
-
-    <div class="field">
-      <label>Taxa para MZN</label>
-      <input
-        type="number"
-        class="ingredient-rate"
-        min="0.000001"
-        step="any"
-        value="1"
-      >
-      <small>Quantos MT pagaste por 1 unidade da moeda?</small>
-    </div>
-  </div>
-</div>
-
-
-  <button type="button" id="addIngredientButton">
-    + Adicionar ingrediente
-  </button>
-
-  <div class="field">
-    <label for="laborCost">Custo da mão de obra (MT)</label>
-    <input
-      id="laborCost"
-      type="number"
-      min="0"
-      step="0.01"
-      value="0"
-    >
-  </div>
-
-  <div class="field">
-    <label for="productionExpenses">Gás, eletricidade e outros custos (MT)</label>
-    <input
-      id="productionExpenses"
-      type="number"
-      min="0"
-      step="0.01"
-      value="0"
-    >
-  </div>
-</div>
-
-          
-<div class="field">
-  <label for="currency">Moeda utilizada na compra</label>
-  <select id="currency" name="currency">
-    <option value="MZN">Metical moçambicano (MZN)</option>
-    <option value="ZAR">Rand sul-africano (ZAR)</option>
-    <option value="USD">Dólar americano (USD)</option>
-    <option value="EUR">Euro (EUR)</option>
-    <option value="GBP">Libra esterlina (GBP)</option>
-    <option value="CNY">Yuan chinês (CNY)</option>
-  </select>
-  <small>Escolhe a moeda em que pagaste ao fornecedor.</small>
-</div>
-
-<div class="field">
-  <label for="purchaseCost">Custo total da compra</label>
-  <input
-    id="purchaseCost"
-    name="purchaseCost"
-    type="number"
-    min="0.01"
-    step="0.01"
-    placeholder="Ex.: 500"
-    required
-  >
-  <small id="purchaseCostHelp">
-    Introduz o valor na moeda selecionada.
-  </small>
-</div>
-
-<div class="field" id="exchangeRateField">
-  <label for="exchangeRate">Taxa de câmbio para MZN</label>
-  <input
-    id="exchangeRate"
-    name="exchangeRate"
-    type="number"
-    min="0.000001"
-    step="any"
-    value="1"
-    required
-  >
-  <small id="exchangeRateHelp">
-    Quantos meticais pagaste por uma unidade da moeda selecionada?
-  </small>
-</div>
-
-
-          <div class="field">
-            <label for="quantity">Quantidade de unidades</label>
-            <input
-              id="quantity"
-              name="quantity"
-              type="number"
-              min="1"
-              step="1"
-              placeholder="Ex.: 24"
-              required
-            >
-            <small>Quantas unidades vais vender ou produzir.</small>
-          </div>
-
-          <div class="field">
-            <label for="expenses">Despesas adicionais (MT)</label>
-            <input
-              id="expenses"
-              name="expenses"
-              type="number"
-              min="0"
-              step="0.01"
-              value="0"
-              required
-            >
-            <small>Transporte, embalagens, energia e outros custos.</small>
-          </div>
-
-          <div class="field">
-            <div class="label-line">
-              <label for="margin">Margem de lucro pretendida</label>
-              <span class="percentage-unit">%</span>
+        <div class="section-heading"><div class="section-icon">01</div><div><h2 id="formTitle">Dados do produto</h2><p>Escolhe a actividade e introduz os teus custos.</p></div></div>
+        <form id="priceForm" novalidate>
+          <section class="mode-picker">
+            <div class="mode-picker-heading"><div><span class="eyebrow">PASSO 1</span><h3>Escolhe o tipo de actividade</h3></div><span class="mode-count">3 formas de calcular</span></div>
+            <div class="mode-cards" role="group" aria-label="Tipo de actividade">
+              <button class="mode-card is-active" type="button" data-mode="resale" aria-pressed="true"><span class="mode-icon">R</span><span class="mode-check">✓</span><strong>Revenda</strong><small>Compras produtos prontos e revendes.</small><span class="mode-link">Calcular preço <b>↗</b></span></button>
+              <button class="mode-card" type="button" data-mode="production" aria-pressed="false"><span class="mode-icon">F</span><span class="mode-check">✓</span><strong>Fabrico</strong><small>Transformas ingredientes ou materiais em produtos.</small><span class="mode-link">Calcular preço <b>↗</b></span></button>
+              <button class="mode-card" type="button" data-mode="service" aria-pressed="false"><span class="mode-icon">S</span><span class="mode-check">✓</span><strong>Serviços</strong><small>Cobras por mão de obra, deslocação e materiais.</small><span class="mode-link">Calcular preço <b>↗</b></span></button>
             </div>
-            <input
-              id="margin"
-              name="margin"
-              type="number"
-              min="0"
-              max="99.99"
-              step="0.01"
-              value="40"
-              required
-            >
-            <small>
-              Percentagem do preço de venda que pretendes obter como lucro.
-            </small>
+            <select id="calculationMode" name="calculationMode" class="visually-hidden" aria-hidden="true" tabindex="-1"><option value="resale">Revenda</option><option value="production">Fabrico</option><option value="service">Serviços</option></select>
+            <p id="modeIntroduction" class="mode-introduction">Usa este modo quando compras produtos prontos e depois os revendes. Introduz o custo da compra, a moeda, a taxa de câmbio e as despesas adicionais.</p>
+          </section>
+
+          <div class="field"><label for="productName">Nome do produto ou serviço</label><input id="productName" name="productName" type="text" placeholder="Ex.: Cerveja, bolo, reparação eléctrica" maxlength="80"></div>
+
+          <div id="productionFields" class="materials-section" hidden>
+            <div class="materials-heading"><div><span class="eyebrow">CUSTOS DIRECTOS</span><h3 id="materialsHeading">Ingredientes e materiais utilizados</h3></div><p id="materialsDescription">Regista o custo da quantidade de cada ingrediente ou material utilizado nesta produção.</p></div>
+            <div id="ingredientsList">
+              <div class="ingredient-row">
+                <div class="field"><label>Nome do ingrediente ou material</label><input type="text" class="ingredient-name" placeholder="Ex.: Farinha" maxlength="80"></div>
+                <div class="field"><label>Custo utilizado</label><input type="number" class="ingredient-cost" min="0" step="0.01" placeholder="Ex.: 150"></div>
+                <div class="field"><label>Moeda</label><select class="ingredient-currency"><option value="MZN">MZN</option><option value="ZAR">ZAR</option><option value="USD">USD</option><option value="EUR">EUR</option><option value="GBP">GBP</option><option value="CNY">CNY</option></select></div>
+                <div class="field"><label>Taxa para MZN</label><input type="number" class="ingredient-rate" min="0.000001" step="any" value="1"><small>MT por 1 unidade da moeda.</small></div>
+              </div>
+            </div>
+            <button type="button" id="addIngredientButton" class="add-material-button">＋ Adicionar ingrediente/material</button>
+            <div class="field"><label id="laborCostLabel" for="laborCost">Custo da mão de obra (MT)</label><input id="laborCost" type="number" min="0" step="0.01" value="0"></div>
+            <div class="field"><label id="productionExpensesLabel" for="productionExpenses">Gás, electricidade e outros custos (MT)</label><input id="productionExpenses" type="number" min="0" step="0.01" value="0"></div>
           </div>
 
+          <div id="resaleFields">
+            <div class="form-grid">
+              <div class="field"><label for="currency">Moeda utilizada na compra</label><select id="currency" name="currency"><option value="MZN">Metical moçambicano (MZN)</option><option value="ZAR">Rand sul-africano (ZAR)</option><option value="USD">Dólar americano (USD)</option><option value="EUR">Euro (EUR)</option><option value="GBP">Libra esterlina (GBP)</option><option value="CNY">Yuan chinês (CNY)</option></select><small>Moeda em que pagaste ao fornecedor.</small></div>
+              <div class="field"><label for="purchaseCost">Custo total da compra</label><input id="purchaseCost" name="purchaseCost" type="number" min="0.01" step="0.01" placeholder="Ex.: 500"><small id="purchaseCostHelp">Introduz o valor na moeda seleccionada.</small></div>
+            </div>
+            <div class="field" id="exchangeRateField"><label for="exchangeRate">Taxa de câmbio para MZN</label><input id="exchangeRate" name="exchangeRate" type="number" min="0.000001" step="any" value="1"><small id="exchangeRateHelp">Quantos meticais pagaste por uma unidade da moeda seleccionada?</small></div>
+          </div>
+
+          <div class="form-grid">
+            <div class="field"><label for="quantity">Quantidade de unidades ou serviços</label><input id="quantity" name="quantity" type="number" min="1" step="1" placeholder="Ex.: 12"><small>Quantidade total que vais vender ou executar.</small></div>
+            <div class="field"><label for="expenses" id="expensesLabel">Despesas adicionais (MT)</label><input id="expenses" name="expenses" type="number" min="0" step="0.01" value="0"><small id="expensesHelp">Transporte, embalagens e outros custos.</small></div>
+          </div>
+          <div class="field margin-field"><div class="label-line"><label for="margin">Margem de lucro pretendida</label><span class="percentage-unit">%</span></div><input id="margin" name="margin" type="number" min="0" max="99.99" step="0.01" value="40"><small>Percentagem do preço de venda que pretendes obter como lucro.</small></div>
           <div id="formError" class="form-error" role="alert" hidden></div>
-
-          <button type="submit" class="primary-button">
-            Calcular preço de venda
-            <span aria-hidden="true">→</span>
-          </button>
-
-          <p class="privacy-note">
-            Os cálculos são feitos no teu dispositivo.
-          </p>
+          <button type="submit" class="primary-button">Calcular preço de venda <span>→</span></button>
+          <p class="privacy-note"><span>●</span> Os teus cálculos ficam guardados neste dispositivo.</p>
         </form>
       </section>
 
-      <section
-        id="results"
-        class="panel results-panel"
-        aria-live="polite"
-        hidden
-      >
-        <div class="section-heading">
-          <div class="section-icon">02</div>
-          <div>
-            <h2>Resultado do cálculo</h2>
-            <p>Resumo financeiro do teu produto.</p>
+      <aside id="results" class="panel results-panel" aria-live="polite">
+        <div class="section-heading"><div class="section-icon">02</div><div><h2>Resultado do cálculo</h2><p>Resumo financeiro do teu produto ou serviço.</p></div></div>
+        <div id="emptyResults" class="empty-results"><div class="empty-illustration">MT</div><h3>O teu resultado aparecerá aqui</h3><p>Preenche os dados do lado esquerdo e selecciona <strong>Calcular preço de venda</strong> para veres o preço recomendado, os custos e o lucro.</p></div>
+        <div id="resultContent" hidden>
+          <div class="price-card"><span class="price-label">PREÇO RECOMENDADO POR UNIDADE OU SERVIÇO</span><div id="sellingPrice" class="selling-price">0,00 MT</div><p id="priceExplanation" class="price-explanation"></p><div class="price-card-footer"><span>Margem efectiva</span><strong id="actualMargin">0%</strong></div></div>
+          <h3 class="subheading">Resumo financeiro</h3>
+          <div class="metrics-grid">
+            <article class="metric-card"><span class="metric-icon">C</span><span class="metric-label">Custo por unidade/serviço</span><strong id="unitCost">0,00 MT</strong></article>
+            <article class="metric-card"><span class="metric-icon">L</span><span class="metric-label">Lucro por unidade/serviço</span><strong id="unitProfit" class="positive">0,00 MT</strong></article>
+            <article class="metric-card"><span class="metric-icon">T</span><span class="metric-label">Custo total</span><strong id="totalCost">0,00 MT</strong></article>
+            <article class="metric-card"><span class="metric-icon">V</span><span class="metric-label">Receita total prevista</span><strong id="totalRevenue">0,00 MT</strong></article>
           </div>
+          <div class="profit-card"><div><span>Lucro total estimado</span><small id="profitDescription">Se venderes todas as unidades.</small></div><strong id="totalProfit">0,00 MT</strong></div>
+          <div class="calculation-details"><h3>Como chegámos a este preço?</h3><div class="detail-row"><span id="purchaseSummaryLabel">Custo da compra</span><strong id="purchaseSummary">0,00 MT</strong></div><div class="detail-row"><span id="convertedCostLabel">Custo convertido para MZN</span><strong id="convertedCost">0,00 MT</strong></div><div class="detail-row"><span id="expensesSummaryLabel">Despesas adicionais</span><strong id="expensesSummary">0,00 MT</strong></div><div class="detail-row"><span>Quantidade</span><strong id="quantitySummary">0</strong></div><div class="detail-row"><span>Preço antes do arredondamento</span><strong id="exactPrice">0,00 MT</strong></div></div>
+          <p id="resultNotice" class="result-notice"></p>
+          <button type="button" id="shareButton" class="primary-button">Partilhar resultado <span>↗</span></button><button type="button" id="resetButton" class="secondary-button">Fazer novo cálculo</button>
         </div>
+      </aside>
+    </section>
 
-        <div class="price-card">
-          <span class="price-label">PREÇO RECOMENDADO POR UNIDADE</span>
-          <div id="sellingPrice" class="selling-price">0,00 MT</div>
-          <p id="priceExplanation" class="price-explanation"></p>
-          <div class="price-card-footer">
-            <span>Margem efectiva</span>
-            <strong id="actualMargin">0%</strong>
-          </div>
-        </div>
+    <section class="panel history-panel" id="historico"><div class="section-heading"><div class="section-icon">03</div><div><h2>Histórico de cálculos</h2><p>Consulta, edita e exporta os teus cálculos anteriores.</p></div></div><div class="history-summary"><div><span class="summary-label">CÁLCULOS GUARDADOS</span><strong id="historyCount">0</strong></div><div><span class="summary-label">CUSTO TOTAL</span><strong id="historyTotalCost">0,00 MT</strong></div><div><span class="summary-label">LUCRO TOTAL ESTIMADO</span><strong id="historyTotalProfit">0,00 MT</strong></div></div><div id="historyList" class="history-list"><p class="history-empty">Ainda não existem cálculos guardados.</p></div><div class="history-actions"><button type="button" id="clearHistoryButton" class="secondary-button">Limpar histórico</button><button type="button" id="exportHistoryButton" class="secondary-button">Exportar histórico CSV</button></div></section>
 
-        <h3 class="subheading">Resumo financeiro</h3>
+    <section class="how-it-works"><span class="hero-label">SIMPLES E TRANSPARENTE</span><h2>Como funciona o cálculo?</h2><p>Somamos o custo de compra ou dos materiais, a mão de obra e as despesas adicionais. Depois dividimos pela quantidade e aplicamos a margem pretendida sobre o preço de venda.</p><div class="formula">Preço de venda = Custo por unidade ÷ (1 − Margem)</div></section>
+    <footer class="footer"><div class="footer-brand">Quanto Devo Cobrar?</div><p>Uma ferramenta para ajudar os negócios moçambicanos.</p><small>Os resultados são estimativas baseadas nos dados introduzidos.</small></footer>
 
-        <div class="metrics-grid">
-          <article class="metric-card">
-            <span class="metric-icon">C</span>
-            <span class="metric-label">Custo por unidade</span>
-            <strong id="unitCost">0,00 MT</strong>
-          </article>
-
-          <article class="metric-card">
-            <span class="metric-icon">L</span>
-            <span class="metric-label">Lucro por unidade</span>
-            <strong id="unitProfit" class="positive">0,00 MT</strong>
-          </article>
-
-          <article class="metric-card">
-            <span class="metric-icon">T</span>
-            <span class="metric-label">Custo total</span>
-            <strong id="totalCost">0,00 MT</strong>
-          </article>
-
-          <article class="metric-card">
-            <span class="metric-icon">V</span>
-            <span class="metric-label">Receita total prevista</span>
-            <strong id="totalRevenue">0,00 MT</strong>
-          </article>
-        </div>
-
-        <div class="profit-card">
-          <div>
-            <span>Lucro total estimado</span>
-            <small id="profitDescription">Se venderes todas as unidades.</small>
-          </div>
-          <strong id="totalProfit">0,00 MT</strong>
-        </div>
-
-        <div class="calculation-details">
-          <h3>Como chegámos a este preço?</h3>
-
-          <div class="detail-row">
-            <span id="purchaseSummaryLabel">Custo da compra</span>
-            <strong id="purchaseSummary">0,00 MT</strong>
-          </div>
-
-         <div class="detail-row">
-          <span id="convertedCostLabel">Custo convertido para MZN</span>
-          <strong id="convertedCost">0,00 MT</strong>
-         </div>
-
-          <div class="detail-row">
-            <span id="expensesSummaryLabel">Despesas adicionais</span>
-            <strong id="expensesSummary">0,00 MT</strong>
-          </div>
-
-          <div class="detail-row">
-            <span>Quantidade</span>
-            <strong id="quantitySummary">0</strong>
-          </div>
-
-          <div class="detail-row">
-            <span>Preço antes do arredondamento</span>
-            <strong id="exactPrice">0,00 MT</strong>
-          </div>
-        </div>
-
-        <p id="resultNotice" class="result-notice"></p>
-
-        <button type="button" id="shareButton" class="primary-button">
-          Partilhar resultado
-          <span aria-hidden="true">↗</span>
-        </button>
-
-        <button type="button" id="resetButton" class="secondary-button">
-          Fazer novo cálculo
-        </button>
-     
-      </section>
-    </div>
-
-    <section class="panel history-panel">
-      <div class="section-heading">
-        <div class="section-icon">03</div>
-        <div>
-          <h2>Histórico de cálculos</h2>
-          <p>Consulta os teus cálculos anteriores.</p>
-        </div>
-      </div>
-
-
-<div class="history-summary">
-  <h3>Resumo do histórico</h3>
-
-  <p>
-    Número de cálculos:
-    <strong id="historyCount">0</strong>
-  </p>
-
-  <p>
-    Custo total:
-    <strong id="historyTotalCost">0,00 MZN</strong>
-  </p>
-
-  <p>
-    Lucro total estimado:
-    <strong id="historyTotalProfit">0,00 MZN</strong>
-  </p>
-</div>
-
-
-      <div id="historyList">
-        <p>Ainda não existem cálculos guardados.</p>
-      </div>
-
-      <button
-        type="button"
-        id="clearHistoryButton"
-        class="secondary-button"
-      >
-        Limpar histórico
-      </button>
-
-      
-<button
-  type="button"
-  id="exportHistoryButton"
-  class="secondary-button"
+<a
+  class="whatsapp-help"
+  href="https://wa.me/258845150325?text=Ol%C3%A1!%20Estou%20a%20utilizar%20a%20aplica%C3%A7%C3%A3o%20Quanto%20Devo%20Cobrar%20e%20preciso%20de%20ajuda."
+  target="_blank"
+  rel="noopener noreferrer"
+  aria-label="Pedir ajuda pelo WhatsApp"
 >
-  Exportar histórico para Excel
-</button>
+  <span class="whatsapp-help-icon">✆</span>
+  <span>
+    <strong>Precisas de ajuda?</strong>
+    <small>Fala connosco pelo WhatsApp</small>
+  </span>
+</a>
 
-
-    </section>
-
-    <section class="how-it-works">
-
-      <span class="hero-label">SIMPLES E TRANSPARENTE</span>
-      <h2>Como funciona o cálculo?</h2>
-      <p>
-        Somamos o custo da compra e as despesas adicionais.
-        Depois dividimos pela quantidade e aplicamos a margem
-        pretendida sobre o preço de venda.
-      </p>
-      <div class="formula">
-        Preço de venda = Custo por unidade ÷ (1 − Margem)
-      </div>
-    </section>
-
-    <footer class="footer">
-      <div class="footer-brand">Quanto Devo Cobrar?</div>
-      <p>Uma ferramenta para ajudar os negócios moçambicanos.</p>
-      <small>Os resultados são estimativas baseadas nos dados introduzidos.</small>
-    </footer>
   </main>
 </body>
 </html>

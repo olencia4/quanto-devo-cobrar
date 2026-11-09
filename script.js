@@ -1,1281 +1,381 @@
-
-"use strict";
-
-// Ligação ao Supabase
-const SUPABASE_URL = "https://bndstqeslspkzmfinmia.supabase.co";
-
-const SUPABASE_KEY = "sb_publishable_NPjGuXeBFH0JwMF6lP--pg_HfEkVpaX";
-
-const supabaseClient = window.supabase.createClient(
-    SUPABASE_URL,
-    SUPABASE_KEY
-);
-
-const form = document.getElementById("priceForm");
-const results = document.getElementById("results");
-const formError = document.getElementById("formError");
-
-const fields = {
-  name: document.getElementById("productName"),
-  mode: document.getElementById("calculationMode"),
-  currency: document.getElementById("currency"),
-  cost: document.getElementById("purchaseCost"),
-  exchangeRate: document.getElementById("exchangeRate"),
-  quantity: document.getElementById("quantity"),
-  expenses: document.getElementById("expenses"),
-  margin: document.getElementById("margin")
-};
-
-const historyCount = document.getElementById("historyCount");
-const historyTotalCost = document.getElementById("historyTotalCost");
-const historyTotalProfit = document.getElementById("historyTotalProfit");
-
-
-const shareButton = document.getElementById("shareButton");
-const resetButton = document.getElementById("resetButton");
-const historyList = document.getElementById("historyList");
-const clearHistoryButton = document.getElementById("clearHistoryButton");
-const exportHistoryButton = document.getElementById("exportHistoryButton");
-
-const HISTORY_KEY = "quantoDevoCobrar_historico_v1";
-const productionFields = document.getElementById("productionFields");
-const ingredientsList = document.getElementById("ingredientsList");
-const addIngredientButton = document.getElementById("addIngredientButton");
-const laborCostField = document.getElementById("laborCost");
-const productionExpensesField =
-  document.getElementById("productionExpenses");
-
-const currencyNames = {
-  MZN: "Metical moçambicano",
-  ZAR: "Rand sul-africano",
-  USD: "Dólar americano",
-  EUR: "Euro",
-  GBP: "Libra esterlina",
-  CNY: "Yuan chinês"
-};
-
-let lastResult = null;
-let editingHistoryId = null;
-
-const money = new Intl.NumberFormat("pt-MZ", {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2
-});
-
-function formatMT(value) {
-  return `${money.format(value)} MT`;
-}
-
-function formatOriginalCurrency(value, currency) {
-  return new Intl.NumberFormat("pt-MZ", {
-    style: "currency",
-    currency,
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  }).format(value);
-}
-
-function formatPercent(value) {
-  return `${money.format(value)}%`;
-}
-
-function roundUpToCent(value) {
-  return Math.ceil((value - 1e-10) * 100) / 100;
-}
-
-function showError(message) {
-  formError.textContent = message;
-  formError.hidden = false;
-}
-
-function clearError() {
-  formError.textContent = "";
-  formError.hidden = true;
-}
-
-function setText(id, value) {
-  const element = document.getElementById(id);
-
-  if (element) {
-    element.textContent = value;
-  }
-}
-
-function updateCurrency() {
-  const currency = fields.currency.value;
-  const isMZN = currency === "MZN";
-
-  document.getElementById("purchaseCostHelp").textContent =
-    `Introduz o valor na moeda selecionada (${currency}).`;
-
-  fields.exchangeRate.disabled = isMZN;
-  fields.exchangeRate.required =
-    !isMZN && fields.mode.value === "resale";
-
-  if (isMZN) {
-    fields.exchangeRate.value = "1";
-  } else if (fields.exchangeRate.value === "1") {
-    fields.exchangeRate.value = "";
-  }
-
-  document.getElementById("exchangeRateHelp").textContent =
-    `Quantos MZN pagaste por 1 ${currency}? Introduz a taxa aplicada à compra.`;
-
-  updateCalculationMode();
-}
-
-function updateCalculationMode() {
-  const isProduction = fields.mode.value === "production";
-
-  productionFields.hidden = !isProduction;
-
-  fields.currency.closest(".field").hidden = isProduction;
-  fields.cost.closest(".field").hidden = isProduction;
-  fields.expenses.closest(".field").hidden = isProduction;
-
-  document.getElementById("exchangeRateField").hidden =
-    isProduction || fields.currency.value === "MZN";
-
-  // Campos obrigatórios para revenda
-  fields.cost.required = !isProduction;
-  fields.expenses.required = !isProduction;
-  fields.exchangeRate.required =
-    !isProduction && fields.currency.value !== "MZN";
-
-  // Desativar campos de revenda durante o fabrico
-  fields.cost.disabled = isProduction;
-  fields.expenses.disabled = isProduction;
-  fields.currency.disabled = isProduction;
-  fields.exchangeRate.disabled =
-    isProduction || fields.currency.value === "MZN";
-
-  // Campos obrigatórios para fabrico
-  laborCostField.required = isProduction;
-  productionExpensesField.required = isProduction;
-}
-
-
-function addIngredientRow() {
-  const row = document.createElement("div");
-  row.className = "ingredient-row";
-
-  row.innerHTML = `
-    <div class="field">
-      <label>Nome do ingrediente ou material</label>
-      <input
-        type="text"
-        class="ingredient-name"
-        placeholder="Ex.: Açúcar"
-        maxlength="80"
-      >
-    </div>
-
-    <div class="field">
-      <label>Custo utilizado</label>
-      <input
-        type="number"
-        class="ingredient-cost"
-        min="0"
-        step="0.01"
-        placeholder="Ex.: 100"
-      >
-    </div>
-
-    <div class="field">
-      <label>Moeda</label>
-      <select class="ingredient-currency">
-        <option value="MZN">Metical (MZN)</option>
-        <option value="ZAR">Rand (ZAR)</option>
-        <option value="USD">Dólar (USD)</option>
-        <option value="EUR">Euro (EUR)</option>
-        <option value="GBP">Libra (GBP)</option>
-        <option value="CNY">Yuan (CNY)</option>
-      </select>
-    </div>
-
-    <div class="field">
-      <label>Taxa para MZN</label>
-      <input
-        type="number"
-        class="ingredient-rate"
-        min="0.000001"
-        step="any"
-        value="1"
-      >
-      <small>Quantos MT pagaste por 1 unidade da moeda?</small>
-    </div>
-  `;
-
-  ingredientsList.appendChild(row);
-
-  const currencySelect = row.querySelector(".ingredient-currency");
-  const rateInput = row.querySelector(".ingredient-rate");
-
-  function updateIngredientCurrency() {
-    const isMZN = currencySelect.value === "MZN";
-
-    rateInput.disabled = isMZN;
-    rateInput.required = !isMZN;
-    rateInput.value = isMZN ? "1" : "";
-  }
-
-  currencySelect.addEventListener("change", updateIngredientCurrency);
-  updateIngredientCurrency();
-
-  row.querySelector(".ingredient-name").focus();
-}
-
-addIngredientButton.addEventListener("click", addIngredientRow);
-
-const STORAGE_KEY = "quantoDevoCobrar_dados_v1";
-
-function saveFormData() {
-  const data = {
-    fields: {
-      name: fields.name.value,
-      mode: fields.mode.value,
-      currency: fields.currency.value,
-      cost: fields.cost.value,
-      exchangeRate: fields.exchangeRate.value,
-      quantity: fields.quantity.value,
-      expenses: fields.expenses.value,
-      margin: fields.margin.value,
-      laborCost: laborCostField.value,
-      productionExpenses: productionExpensesField.value
-    },
-
-    ingredients: Array.from(
-      ingredientsList.querySelectorAll(".ingredient-row")
-    ).map((row) => ({
-      name: row.querySelector(".ingredient-name").value,
-      cost: row.querySelector(".ingredient-cost").value,
-      currency: row.querySelector(".ingredient-currency")?.value || "MZN",
-      rate: row.querySelector(".ingredient-rate")?.value || "1"
-    }))
+/* Quanto Devo Cobrar? | versão premium */
+(() => {
+  "use strict";
+  const SUPABASE_URL = "https://bndstqeslspkzmfinmia.supabase.co";
+  const SUPABASE_KEY = "sb_publishable_NPjGuXeBFH0JwMF6lP--pg_HfEkVpaX";
+  const STORAGE_KEY = "quantoDevoCobrar_history_v3";
+  const FORM_KEY = "quantoDevoCobrar_form_v3";
+  const $ = (id) => document.getElementById(id);
+  const fields = {
+    form: $("priceForm"), name: $("productName"), mode: $("calculationMode"), currency: $("currency"),
+    cost: $("purchaseCost"), rate: $("exchangeRate"), quantity: $("quantity"), expenses: $("expenses"),
+    margin: $("margin"), production: $("productionFields"), resale: $("resaleFields"),
+    ingredients: $("ingredientsList"), labor: $("laborCost"), productionExpenses: $("productionExpenses")
   };
+  const currencyNames = {MZN:"Metical",ZAR:"Rand",USD:"Dólar",EUR:"Euro",GBP:"Libra",CNY:"Yuan"};
+  let history = readJSON(STORAGE_KEY, []);
+  let editingHistoryId = null;
+  let latestResult = null;
+  let supabaseClient = null;
 
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-  } catch (error) {
-    console.warn("Não foi possível guardar os dados.", error);
+  function readJSON(key, fallback) { try { const value = JSON.parse(localStorage.getItem(key)); return value ?? fallback; } catch { return fallback; } }
+  function saveJSON(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch (error) { console.warn("Não foi possível guardar os dados localmente.", error); } }
+  function number(value) { const parsed = Number(value); return Number.isFinite(parsed) ? parsed : 0; }
+  function money(value) { return new Intl.NumberFormat("pt-MZ", {minimumFractionDigits:2, maximumFractionDigits:2}).format(number(value)) + " MT"; }
+  function showError(message) { const box = $("formError"); box.textContent = message; box.hidden = !message; if (message) box.scrollIntoView({behavior:"smooth",block:"nearest"}); }
+  function hideError() { showError(""); }
+  function roundUpToCent(value) { return Math.ceil((value - 1e-10) * 100) / 100; }
+  function getModeText(mode) {
+    if (mode === "production") return {title:"Dados do fabrico",intro:"Usa este modo quando transformas ingredientes ou matérias-primas num produto. Regista apenas a quantidade efectivamente utilizada, a mão de obra e os custos de produção.",materials:"Ingredientes e materiais utilizados",description:"Indica o custo da quantidade de cada ingrediente ou material usada neste lote.",labor:"Mão de obra da produção (MT)",extra:"Energia, gás e outros custos de produção (MT)",expenses:"Outras despesas do lote (MT)"};
+    if (mode === "service") return {title:"Dados do serviço",intro:"Usa este modo para calcular o preço de um trabalho ou serviço. Inclui materiais consumidos, mão de obra, deslocação e outras despesas. Para ferramentas reutilizáveis, considera apenas o custo proporcional ao serviço.",materials:"Materiais utilizados no serviço",description:"Adiciona os materiais consumidos neste trabalho. Se não utilizares materiais, podes deixar esta secção vazia.",labor:"Mão de obra do serviço (MT)",extra:"Deslocação e outros custos directos (MT)",expenses:"Despesas adicionais do serviço (MT)"};
+    return {title:"Dados do produto",intro:"Usa este modo quando compras produtos prontos e depois os revendes. Introduz o custo da compra, a moeda, a taxa de câmbio e as despesas adicionais.",materials:"Ingredientes e materiais utilizados",description:"Regista o custo da quantidade de cada ingrediente ou material utilizado nesta produção.",labor:"Custo da mão de obra (MT)",extra:"Gás, electricidade e outros custos (MT)",expenses:"Despesas adicionais (MT)"};
   }
-}
-
-function loadFormData() {
-  let data;
-
-  try {
-    const savedData = localStorage.getItem(STORAGE_KEY);
-
-    if (!savedData) {
-      return;
+  function updateMode() {
+    const mode = fields.mode.value;
+    const config = getModeText(mode);
+    document.querySelectorAll(".mode-card").forEach(card => {
+      const active = card.dataset.mode === mode;
+      card.classList.toggle("is-active", active);
+      card.setAttribute("aria-pressed", String(active));
+    });
+    $("formTitle").textContent = config.title;
+    $("modeIntroduction").textContent = config.intro;
+    $("materialsHeading").textContent = config.materials;
+    $("materialsDescription").textContent = config.description;
+    $("laborCostLabel").textContent = config.labor;
+    $("productionExpensesLabel").textContent = config.extra;
+    $("expensesLabel").textContent = config.expenses;
+    fields.production.hidden = mode === "resale";
+    fields.resale.hidden = mode !== "resale";
+    fields.cost.required = mode === "resale";
+    fields.rate.required = mode === "resale" && fields.currency.value !== "MZN";
+    updateCurrency();
+    saveFormData();
+  }
+  function updateCurrency() {
+    const isMZN = fields.currency.value === "MZN";
+    fields.rate.disabled = isMZN;
+    fields.rate.value = isMZN ? "1" : (number(fields.rate.value) > 0 ? fields.rate.value : "");
+   fields.rate.required = fields.mode.value === "resale" && !isMZN;
+    $("exchangeRateField").style.opacity = isMZN ? ".68" : "1";
+    $("purchaseCostHelp").textContent = `Introduz o valor em ${currencyNames[fields.currency.value]} (${fields.currency.value}).`;
+    $("exchangeRateHelp").textContent = `Quantos meticais pagaste por 1 ${fields.currency.value}?`;
+    saveFormData();
+  }
+  function addIngredientRow(data = {}) {
+    const row = document.createElement("div");
+    row.className = "ingredient-row";
+    row.innerHTML = `<div class="field"><label>Nome do ingrediente/material</label><input type="text" class="ingredient-name" maxlength="80" placeholder="Ex.: Farinha"></div><div class="field"><label>Custo utilizado</label><input type="number" class="ingredient-cost" min="0" step="0.01" placeholder="Ex.: 150"></div><div class="field"><label>Moeda</label><select class="ingredient-currency"><option value="MZN">MZN</option><option value="ZAR">ZAR</option><option value="USD">USD</option><option value="EUR">EUR</option><option value="GBP">GBP</option><option value="CNY">CNY</option></select></div><div class="field"><label>Taxa para MZN</label><input type="number" class="ingredient-rate" min="0.000001" step="any" value="1"><small>MT por 1 unidade da moeda.</small><button type="button" class="remove-material">Remover</button></div>`;
+    const name = row.querySelector(".ingredient-name");
+    const cost = row.querySelector(".ingredient-cost");
+    const currency = row.querySelector(".ingredient-currency");
+    const rate = row.querySelector(".ingredient-rate");
+    name.value = data.name || ""; cost.value = data.cost ?? ""; currency.value = data.currency || "MZN"; rate.value = data.rate ?? "1";
+    rate.disabled = currency.value === "MZN";
+    currency.addEventListener("change", () => { rate.disabled = currency.value === "MZN"; if (rate.disabled) rate.value = "1"; else if (number(rate.value) <= 0) rate.value = ""; saveFormData(); });
+    row.querySelector(".remove-material").addEventListener("click", () => { row.remove(); saveFormData(); });
+    row.querySelectorAll("input,select").forEach(el => el.addEventListener("input", saveFormData));
+    fields.ingredients.appendChild(row);
+    return row;
+  }
+  function collectIngredients() {
+    return [...fields.ingredients.querySelectorAll(".ingredient-row")].map(row => ({
+      name:row.querySelector(".ingredient-name").value.trim(), cost:number(row.querySelector(".ingredient-cost").value),
+      currency:row.querySelector(".ingredient-currency").value, rate:number(row.querySelector(".ingredient-rate").value)
+    })).filter(item => item.name || item.cost > 0);
+  }
+  function saveFormData() {
+    if (!fields.form) return;
+    const data = {name:fields.name.value,mode:fields.mode.value,currency:fields.currency.value,cost:fields.cost.value,rate:fields.rate.value,quantity:fields.quantity.value,expenses:fields.expenses.value,margin:fields.margin.value,labor:fields.labor.value,productionExpenses:fields.productionExpenses.value,ingredients:collectIngredients()};
+    saveJSON(FORM_KEY,data);
+  }
+  function loadFormData() {
+    const data = readJSON(FORM_KEY,null); if (!data) return;
+    fields.name.value=data.name||""; fields.mode.value=data.mode||"resale"; fields.currency.value=data.currency||"MZN"; fields.cost.value=data.cost||""; fields.rate.value=data.rate||"1"; fields.quantity.value=data.quantity||""; fields.expenses.value=data.expenses??"0"; fields.margin.value=data.margin||"40"; fields.labor.value=data.labor??"0"; fields.productionExpenses.value=data.productionExpenses??"0";
+    fields.ingredients.innerHTML=""; (data.ingredients?.length?data.ingredients:[{}]).forEach(item=>addIngredientRow(item));
+    updateMode();
+  }
+  function validateAndCalculate() {
+    const mode=fields.mode.value, quantity=number(fields.quantity.value), margin=number(fields.margin.value), expenses=number(fields.expenses.value);
+    if (!fields.name.value.trim()) throw new Error("Introduz o nome do produto ou serviço.");
+    if (!Number.isInteger(quantity)||quantity<1) throw new Error("A quantidade deve ser um número inteiro igual ou superior a 1.");
+    if (margin<0||margin>=100) throw new Error("A margem deve estar entre 0% e 99,99%.");
+    if (expenses<0) throw new Error("As despesas adicionais não podem ser negativas.");
+    let convertedCost=0, originalCost=0, sourceCurrency="MZN", exchangeRate=1, ingredientDetails=[];
+    let labor=0, directExpenses=0;
+    if (mode === "resale") {
+      originalCost=number(fields.cost.value); sourceCurrency=fields.currency.value; exchangeRate=sourceCurrency==="MZN"?1:number(fields.rate.value);
+      if (originalCost<=0) throw new Error("Introduz um custo de compra superior a zero.");
+      if (exchangeRate<=0) throw new Error("Introduz uma taxa de câmbio válida para converter a compra em meticais.");
+      convertedCost=originalCost*exchangeRate;
+    } else {
+      const items=collectIngredients();
+      if (items.some(item=>item.cost<0)) throw new Error("Os custos dos materiais não podem ser negativos.");
+      for (const item of items) {
+        if (item.cost>0 && item.currency!=="MZN" && item.rate<=0) throw new Error(`Indica uma taxa de câmbio válida para ${item.name||"um material"}.`);
+        const rate=item.currency==="MZN"?1:item.rate;
+        const converted=item.cost*rate;
+        convertedCost+=converted; originalCost+=item.cost;
+        ingredientDetails.push({...item,converted,rate});
+      }
+      labor=number(fields.labor.value); directExpenses=number(fields.productionExpenses.value);
+      if (labor<0||directExpenses<0) throw new Error("Mão de obra e custos directos não podem ser negativos.");
+      if (mode==="production" && convertedCost<=0) throw new Error("Adiciona pelo menos um ingrediente ou material com custo superior a zero.");
+      if (mode==="service" && convertedCost+labor+directExpenses+expenses<=0) throw new Error("Introduz pelo menos um custo de material, mão de obra ou despesa para este serviço.");
     }
-
-    data = JSON.parse(savedData);
-  } catch (error) {
-    console.warn("Não foi possível recuperar os dados.", error);
-    return;
+    const totalCosts=convertedCost+labor+directExpenses+expenses;
+    if (totalCosts<=0) throw new Error("O custo total deve ser superior a zero.");
+    const unitCost=totalCosts/quantity;
+    const exactPrice=unitCost/(1-margin/100);
+    const sellingPrice=roundUpToCent(exactPrice);
+    const unitProfit=sellingPrice-unitCost;
+    const totalRevenue=sellingPrice*quantity;
+    const totalProfit=totalRevenue-totalCosts;
+    const actualMargin=sellingPrice>0?(unitProfit/sellingPrice)*100:0;
+    return {id:editingHistoryId||`${Date.now()}-${Math.random().toString(16).slice(2)}`,date:new Date().toISOString(),name:fields.name.value.trim(),mode,quantity,margin,sourceCurrency,exchangeRate,originalCost,convertedCost,labor,directExpenses,expenses,totalCosts,unitCost,exactPrice,sellingPrice,unitProfit,totalRevenue,totalProfit,actualMargin,ingredients:ingredientDetails};
   }
-
-  if (!data || !data.fields || !Array.isArray(data.ingredients)) {
-    return;
+  function renderResult(result) {
+    latestResult=result; $("emptyResults").hidden=true; $("resultContent").hidden=false;
+    $("sellingPrice").textContent=money(result.sellingPrice); $("priceExplanation").textContent=`Preço calculado com uma margem pretendida de ${result.margin.toFixed(2).replace(".",",")}%`;
+    $("actualMargin").textContent=`${result.actualMargin.toFixed(2).replace(".",",")}%`;
+    $("unitCost").textContent=money(result.unitCost); $("unitProfit").textContent=money(result.unitProfit); $("totalCost").textContent=money(result.totalCosts); $("totalRevenue").textContent=money(result.totalRevenue); $("totalProfit").textContent=money(result.totalProfit);
+    $("profitDescription").textContent=`Resultado estimado para ${result.quantity} unidade(s)/serviço(s).`;
+    $("purchaseSummaryLabel").textContent=result.mode==="resale"?`Compra em ${result.sourceCurrency}`:"Materiais e ingredientes";
+    $("purchaseSummary").textContent=result.mode==="resale"?`${money(result.originalCost).replace(" MT","")} ${result.sourceCurrency}`:money(result.originalCost);
+    $("convertedCostLabel").textContent=result.mode==="resale"?`Conversão (${result.exchangeRate} MT por ${result.sourceCurrency})`:"Materiais convertidos para MZN";
+    $("convertedCost").textContent=money(result.convertedCost);
+    $("expensesSummaryLabel").textContent=result.mode==="service"?"Mão de obra, deslocação e despesas":"Mão de obra, custos e despesas";
+    $("expensesSummary").textContent=money(result.labor+result.directExpenses+result.expenses);
+    $("quantitySummary").textContent=String(result.quantity); $("exactPrice").textContent=money(result.exactPrice);
+    $("resultNotice").textContent="O preço recomendado foi arredondado para cima ao cêntimo, para não ficar abaixo da margem pretendida.";
+    $("results").scrollIntoView({behavior:"smooth",block:"start"});
   }
-
-  const savedFields = data.fields;
-
-  fields.name.value = savedFields.name ?? "";
-  fields.mode.value = savedFields.mode ?? "resale";
-  fields.currency.value = savedFields.currency ?? "MZN";
-  fields.cost.value = savedFields.cost ?? "";
-  fields.exchangeRate.value = savedFields.exchangeRate ?? "1";
-  fields.quantity.value = savedFields.quantity ?? "";
-  fields.expenses.value = savedFields.expenses ?? "";
-  fields.margin.value = savedFields.margin ?? "";
-
-  laborCostField.value = savedFields.laborCost ?? "";
-  productionExpensesField.value =
-    savedFields.productionExpenses ?? "";
-
-  ingredientsList.innerHTML = "";
-
-  for (const ingredient of data.ingredients) {
-    addIngredientRow();
-
-    const row = ingredientsList.lastElementChild;
-
-    row.querySelector(".ingredient-name").value =
-      ingredient.name ?? "";
-
-    row.querySelector(".ingredient-cost").value =
-      ingredient.cost ?? "";
-
-    const currencySelect = row.querySelector(".ingredient-currency");
-    const rateInput = row.querySelector(".ingredient-rate");
-
-    currencySelect.value = ingredient.currency ?? "MZN";
-    rateInput.disabled = currencySelect.value === "MZN";
-    rateInput.required = currencySelect.value !== "MZN";
-    rateInput.value =
-      currencySelect.value === "MZN"
-        ? "1"
-        : ingredient.rate ?? "";
+  function saveCalculation(result) {
+    const index=history.findIndex(item=>item.id===result.id);
+    if(index>=0) history[index]=result; else history.unshift(result);
+    saveJSON(STORAGE_KEY,history); renderHistory();
   }
+  function renderHistory() {
+    $("historyCount").textContent=history.length;
+    $("historyTotalCost").textContent=money(history.reduce((sum,item)=>sum+number(item.totalCosts),0));
+    $("historyTotalProfit").textContent=money(history.reduce((sum,item)=>sum+number(item.totalProfit),0));
+    const list=$("historyList"); list.innerHTML="";
+    if(!history.length){list.innerHTML='<p class="history-empty">Ainda não existem cálculos guardados.</p>';return;}
+    history.forEach(item=>{
+      const article=document.createElement("article"); article.className="history-item";
+      const info=document.createElement("div"); const title=document.createElement("h3"); title.textContent=item.name;
+      const date=new Date(item.date).toLocaleString("pt-MZ",{dateStyle:"short",timeStyle:"short"});
+      const detail=document.createElement("p"); detail.textContent=`${modeLabel(item.mode)} · ${date} · Lucro total: ${money(item.totalProfit)}`; info.append(title,detail);
+      const price=document.createElement("strong"); price.textContent=money(item.sellingPrice);
+      const actions=document.createElement("div"); actions.className="history-item-actions";
+      const edit=document.createElement("button"); edit.type="button"; edit.textContent="Editar"; edit.addEventListener("click",()=>loadCalculationForEditing(item.id));
+      const remove=document.createElement("button"); remove.type="button"; remove.className="delete"; remove.textContent="Eliminar"; remove.addEventListener("click",()=>deleteCalculation(item.id));
+      actions.append(edit,remove);
 
-  updateCurrency();
-  updateCalculationMode();
-}
-
-form.addEventListener("input", saveFormData);
-form.addEventListener("change", saveFormData);
-addIngredientButton.addEventListener("click", saveFormData);
-
-function calculate(event) {
-  event.preventDefault();
-  clearError();
-
-  const name = fields.name.value.trim() || "Produto";
-  const mode = fields.mode.value;
-  const quantityText = fields.quantity.value.trim();
-  const marginText = fields.margin.value.trim();
-
-  if (quantityText === "" || marginText === "") {
-    showError("Preenche a quantidade e a margem de lucro.");
-    return;
+      // Detalhes expansíveis de cada cálculo guardado.
+      const details=document.createElement("details"); details.className="history-details";
+      const summary=document.createElement("summary"); summary.textContent="Detalhes do cálculo";
+      const detailContent=document.createElement("div"); detailContent.className="history-detail-content";
+      const rows=[
+        ["Modo",modeLabel(item.mode)],
+        ["Quantidade",String(item.quantity??0)],
+        ["Custo total",money(item.totalCosts)],
+        ["Custo por unidade",money(item.unitCost)],
+        ["Mão de obra",money(item.labor)],
+        [item.mode==="service"?"Deslocação e outras despesas":"Despesas adicionais",money(item.directExpenses??item.expenses)],
+        ["Margem pretendida",`${number(item.margin)}%`],
+        ["Preço exacto",money(item.exactPrice)],
+        ["Preço recomendado por unidade",money(item.sellingPrice)],
+        ["Lucro por unidade",money(item.unitProfit)],
+        ["Receita total estimada",money(item.totalRevenue)],
+        ["Lucro total estimado",money(item.totalProfit)]
+      ];
+      if(item.mode==="resale"){
+        rows.splice(2,0,["Moeda de compra",item.sourceCurrency||"MZN"],["Taxa de câmbio",`${number(item.exchangeRate)||1} MT`],["Valor original da compra",`${number(item.originalCost).toLocaleString("pt-MZ",{minimumFractionDigits:2,maximumFractionDigits:2})} ${item.sourceCurrency||"MZN"}`]);
+      }
+      rows.forEach(([label,value])=>{
+        const row=document.createElement("div"); row.className="history-detail-row";
+        const name=document.createElement("span"); name.textContent=label;
+        const val=document.createElement("strong"); val.textContent=value;
+        row.append(name,val); detailContent.appendChild(row);
+      });
+      if(Array.isArray(item.ingredients)&&item.ingredients.length){
+        const heading=document.createElement("h4"); heading.textContent=item.mode==="service"?"Materiais utilizados":"Ingredientes e materiais"; detailContent.appendChild(heading);
+        item.ingredients.forEach(ingredient=>{
+          const row=document.createElement("div"); row.className="history-detail-row";
+          const name=document.createElement("span"); name.textContent=ingredient.name||"Material";
+          const val=document.createElement("strong"); val.textContent=money(ingredient.converted??ingredient.cost);
+          row.append(name,val); detailContent.appendChild(row);
+        });
+      }
+      details.append(summary,detailContent);
+      article.append(info,price,actions,details); list.appendChild(article);
+    });
   }
-
-  const quantity = Number(quantityText);
-  const margin = Number(marginText);
-
-  if (
-    !Number.isFinite(quantity) ||
-    !Number.isFinite(margin)
-  ) {
-    showError("Introduz valores numéricos válidos.");
-    return;
+  function modeLabel(mode){return mode==="production"?"Fabrico":mode==="service"?"Serviços":"Revenda";}
+  function loadCalculationForEditing(id) {
+    const item=history.find(entry=>entry.id===id); if(!item)return;
+    editingHistoryId=item.id; fields.name.value=item.name; fields.mode.value=item.mode; fields.quantity.value=item.quantity; fields.margin.value=item.margin; fields.expenses.value=item.expenses??0; fields.labor.value=item.labor??0; fields.productionExpenses.value=item.directExpenses??0;
+    fields.currency.value=item.sourceCurrency||"MZN"; fields.cost.value=item.originalCost??""; fields.rate.value=item.exchangeRate||1;
+    fields.ingredients.innerHTML=""; (item.ingredients?.length?item.ingredients:[{}]).forEach(ingredient=>addIngredientRow({name:ingredient.name,cost:ingredient.cost,currency:ingredient.currency,rate:ingredient.rate}));
+    updateMode(); updateCurrency(); $("resetButton").textContent="Cancelar edição"; $("calculadora").scrollIntoView({behavior:"smooth"});
   }
+  function deleteCalculation(id){history=history.filter(item=>item.id!==id);saveJSON(STORAGE_KEY,history);if(editingHistoryId===id)resetForm();renderHistory();}
+  function resetForm(){fields.form.reset();fields.mode.value="resale";fields.currency.value="MZN";fields.rate.value="1";fields.ingredients.innerHTML="";addIngredientRow();editingHistoryId=null;latestResult=null;$("resetButton").textContent="Fazer novo cálculo";$("resultContent").hidden=true;$("emptyResults").hidden=false;updateMode();updateCurrency();hideError();saveFormData();}
+  function exportHistory(){if(!history.length){alert("Ainda não existem cálculos para exportar.");return;}const rows=[["Nome","Modo","Data","Quantidade","Custo total (MZN)","Preço unitário (MZN)","Lucro unitário (MZN)","Lucro total (MZN)","Margem (%)"],...history.map(item=>[item.name,modeLabel(item.mode),new Date(item.date).toLocaleString("pt-MZ"),item.quantity,item.totalCosts,item.sellingPrice,item.unitProfit,item.totalProfit,item.actualMargin])];const csv="\uFEFF"+rows.map(row=>row.map(value=>`"${String(value??"").replace(/"/g,'""')}"`).join(";")).join("\r\n");const blob=new Blob([csv],{type:"text/csv;charset=utf-8;"});const url=URL.createObjectURL(blob);const link=document.createElement("a");link.href=url;link.download="historico-quanto-devo-cobrar.csv";document.body.appendChild(link);link.click();link.remove();URL.revokeObjectURL(url);}
+  async function shareResult(){if(!latestResult)return;const r=latestResult;const text=`QUANTO DEVO COBRAR?\nProduto/serviço: ${r.name}\nModo: ${modeLabel(r.mode)}\nPreço recomendado: ${money(r.sellingPrice)}\nCusto por unidade: ${money(r.unitCost)}\nLucro por unidade: ${money(r.unitProfit)}\nQuantidade: ${r.quantity}\nLucro total estimado: ${money(r.totalProfit)}`;try{if(navigator.share)await navigator.share({title:"Resultado | Quanto Devo Cobrar?",text});else if(navigator.clipboard?.writeText){await navigator.clipboard.writeText(text);$("resultNotice").textContent="Resultado copiado. Já podes colá-lo numa mensagem.";}else{$("resultNotice").textContent=text;}}catch(error){if(error.name!=="AbortError")$("resultNotice").textContent="Não foi possível partilhar automaticamente. Podes copiar os valores apresentados.";}}
 
-  if (!Number.isInteger(quantity) || quantity <= 0) {
-    showError("A quantidade deve ser um número inteiro superior a zero.");
-    return;
-  }
+async function setupAuth() {
+  const form = $("authForm");
+  if (!form) return;
 
-  if (margin < 0 || margin >= 100) {
-    showError("A margem deve estar entre 0% e menos de 100%.");
-    return;
-  }
+  const message = $("authMessage");
+  const signUpButton = $("signUpButton");
+  const signInButton = $("signInButton");
 
-  let originalCost = 0;
-  let currency = "MZN";
-  let exchangeRate = 1;
-  let convertedCost = 0;
-  let ingredientCost = 0;
-  let laborCost = 0;
-  let productionExpenses = 0;
-  let expenses = 0;
-
-  let ingredientsDetails = [];
-
-  if (mode === "production") {
-  const rows = ingredientsList.querySelectorAll(".ingredient-row");
-  const ingredientNames = [];
-
-  for (const row of rows) {
-    const ingredientName =
-      row.querySelector(".ingredient-name").value.trim();
-
-    const costText =
-      row.querySelector(".ingredient-cost").value.trim();
-
-    const currency =
-      row.querySelector(".ingredient-currency").value;
-
-    const rateInput =
-      row.querySelector(".ingredient-rate");
-
-    const rateText = rateInput.value.trim();
-
-    if (ingredientName === "" && costText === "") {
-      continue;
-    }
-
-    if (ingredientName === "" || costText === "") {
-      showError("Preenche o nome e o custo de cada ingrediente.");
-      return;
-    }
-
-    const cost = Number(costText);
-    const rate = currency === "MZN" ? 1 : Number(rateText);
-
-    if (!Number.isFinite(cost) || cost <= 0) {
-      showError("O custo de cada ingrediente deve ser superior a zero.");
-      return;
-    }
-
-    if (!Number.isFinite(rate) || rate <= 0 || rateText === "") {
-      showError(
-        `Introduz uma taxa de câmbio válida para "${ingredientName}".`
-      );
-      rateInput.focus();
-      return;
-    }
-
-    ingredientCost += cost * rate;
-ingredientNames.push(ingredientName);
-
-ingredientsDetails.push({
-  name: ingredientName,
-  cost: cost,
-  currency: currency,
-  exchangeRate: rate,
-  costInMZN: cost * rate
-});
-  }
-
-  if (ingredientNames.length === 0 || ingredientCost <= 0) {
-    showError("Adiciona pelo menos um ingrediente com custo válido.");
-    return;
-  }
-
-  const laborText = laborCostField.value.trim();
-  const productionExpensesText =
-    productionExpensesField.value.trim();
-
-  if (laborText === "" || productionExpensesText === "") {
-    showError("Preenche a mão de obra e as outras despesas. Usa 0 se não houver custos.");
-    return;
-  }
-
-  laborCost = Number(laborText);
-  productionExpenses = Number(productionExpensesText);
-
-  if (
-    !Number.isFinite(laborCost) ||
-    !Number.isFinite(productionExpenses) ||
-    laborCost < 0 ||
-    productionExpenses < 0
-  ) {
-    showError("Os custos de produção não podem ser negativos.");
-    return;
-  }
-
-  convertedCost = ingredientCost;
-  expenses = laborCost + productionExpenses;
-  } else {
-    currency = fields.currency.value;
-
-    const costText = fields.cost.value.trim();
-    const expensesText = fields.expenses.value.trim();
-    const rateText = fields.exchangeRate.value.trim();
-
-    if (
-      costText === "" ||
-      expensesText === "" ||
-      (currency !== "MZN" && rateText === "")
-    ) {
-      showError("Preenche todos os campos obrigatórios.");
-      return;
-    }
-
-    originalCost = Number(costText);
-    expenses = Number(expensesText);
-    exchangeRate =
-      currency === "MZN" ? 1 : Number(rateText);
-
-    if (
-      !Number.isFinite(originalCost) ||
-      !Number.isFinite(expenses) ||
-      !Number.isFinite(exchangeRate)
-    ) {
-      showError("Introduz valores numéricos válidos.");
-      return;
-    }
-
-    if (originalCost <= 0) {
-      showError("O custo da compra deve ser superior a zero.");
-      return;
-    }
-
-    if (expenses < 0 || exchangeRate <= 0) {
-      showError(
-        "As despesas não podem ser negativas e a taxa deve ser superior a zero."
-      );
-      return;
-    }
-
-    convertedCost = originalCost * exchangeRate;
-  }
-
-  const totalCost = convertedCost + expenses;
-  const unitCost = totalCost / quantity;
-  const exactPrice = unitCost / (1 - margin / 100);
-  const sellingPrice = roundUpToCent(exactPrice);
-  const unitProfit = sellingPrice - unitCost;
-  const totalRevenue = sellingPrice * quantity;
-  const totalProfit = totalRevenue - totalCost;
-  const actualMargin = (unitProfit / sellingPrice) * 100;
-
-  lastResult = {
-    name,
-    mode,
-   ingredientsDetails,
-    currency,
-    originalCost,
-    exchangeRate,
-    convertedCost,
-    ingredientCost,
-    laborCost,
-    productionExpenses,
-    expenses,
-    quantity,
-    margin,
-    totalCost,
-    unitCost,
-    exactPrice,
-    sellingPrice,
-    unitProfit,
-    totalRevenue,
-    totalProfit,
-    actualMargin
-  };
-
-  setText("sellingPrice", formatMT(sellingPrice));
-  setText(
-    "priceExplanation",
-    `Margem pretendida: ${formatPercent(margin)}.`
-  );
-  setText("actualMargin", formatPercent(actualMargin));
-  setText("unitCost", formatMT(unitCost));
-  setText("unitProfit", formatMT(unitProfit));
-  setText("totalCost", formatMT(totalCost));
-  setText("totalRevenue", formatMT(totalRevenue));
-  setText("totalProfit", formatMT(totalProfit));
-
- setText(
-  "purchaseSummaryLabel",
-  mode === "production"
-    ? "Custo dos ingredientes e materiais"
-    : "Custo da compra"
-);
-
-setText(
-  "purchaseSummary",
-  mode === "production"
-    ? formatMT(ingredientCost)
-    : formatOriginalCurrency(originalCost, currency)
-);
-
-setText(
-  "convertedCostLabel",
-  mode === "production"
-    ? "Ingredientes e materiais convertidos para MZN"
-    : "Custo convertido para MZN"
-);
-
-setText("convertedCost", formatMT(convertedCost));
-
-setText(
-  "expensesSummaryLabel",
-  mode === "production"
-    ? "Mão de obra e outras despesas de produção"
-    : "Despesas adicionais"
-);
-
-setText("expensesSummary", formatMT(expenses));
-setText("quantitySummary", String(quantity));
-setText("exactPrice", formatMT(exactPrice));
-
-  setText(
-    "profitDescription",
-    `Lucro estimado por unidade: ${formatMT(unitProfit)}.`
-  );
-
-  setText(
-    "resultNotice",
-    mode === "production"
-      ? `Cálculo de fabrico para ${name}. Foram incluídos ingredientes, mão de obra e outras despesas indicadas.`
-      : `Cálculo de revenda para ${name}. A compra foi convertida para MZN usando a taxa introduzida.`
-  );
-    const saved = saveCalculationToHistory(lastResult);
-
-  if (!saved) {
-    return;
-  }
-
-  results.hidden = false;
-  results.scrollIntoView({
-    behavior: "smooth",
-    block: "start"
-  });
-}
-
-function createShareMessage() {
-  if (!lastResult) {
-    return "";
-  }
-
-  const r = lastResult;
-
-  const lines = [
-    "QUANTO DEVO COBRAR?",
-    `Modo: ${r.mode === "production" ? "Fabrico" : "Revenda"}`,
-    `Produto: ${r.name}`
-  ];
-
-  if (r.mode === "production") {
-    lines.push(
-      `Ingredientes e materiais: ${formatMT(r.ingredientCost)}`,
-      `Mão de obra: ${formatMT(r.laborCost)}`,
-      `Outras despesas de produção: ${formatMT(r.productionExpenses)}`
-    );
-  } else {
-    lines.push(
-      `Custo original: ${formatOriginalCurrency(r.originalCost, r.currency)}`,
-      `Taxa de câmbio: 1 ${r.currency} = ${formatMT(r.exchangeRate)}`,
-      `Custo convertido: ${formatMT(r.convertedCost)}`,
-      `Despesas adicionais: ${formatMT(r.expenses)}`
-    );
-  }
-
-  lines.push(
-    `Custo total: ${formatMT(r.totalCost)}`,
-    `Quantidade: ${r.quantity}`,
-    `Custo por unidade: ${formatMT(r.unitCost)}`,
-    `Margem pretendida: ${formatPercent(r.margin)}`,
-    `Preço de venda por unidade: ${formatMT(r.sellingPrice)}`,
-    `Lucro por unidade: ${formatMT(r.unitProfit)}`,
-    `Receita total: ${formatMT(r.totalRevenue)}`,
-    `Lucro total estimado: ${formatMT(r.totalProfit)}`
-  );
-
-  return lines.join("\n");
-}
-
-async function copyMessage(message) {
-  try {
-    await navigator.clipboard.writeText(message);
-    showError("Resultado copiado. Podes colá-lo onde quiseres.");
-  } catch (error) {
-    showError(
-      "Não foi possível copiar automaticamente. Tenta partilhar pelo navegador."
-    );
-  }
-}
-
-shareButton.addEventListener("click", async () => {
-  if (!lastResult) {
-    showError("Faz primeiro um cálculo.");
-    return;
-  }
-
-  const message = createShareMessage();
-
-  if (navigator.share) {
+  if (window.supabase?.createClient) {
     try {
-      await navigator.share({
-        title: "Quanto Devo Cobrar?",
-        text: message
-      });
-    } catch (error) {
-      if (error.name !== "AbortError") {
-        await copyMessage(message);
-      }
-    }
-  } else {
-    await copyMessage(message);
-  }
-});
-
-resetButton.addEventListener("click", () => {
-  form.reset();
-  lastResult = null;
-  clearError();
-  results.hidden = true;
-
-  localStorage.removeItem(STORAGE_KEY);
-
-  ingredientsList.innerHTML = "";
-  addIngredientRow();
-
-  updateCurrency();
-  updateCalculationMode();
-
-  fields.name.focus();
-});
-
-fields.mode.addEventListener("change", updateCalculationMode);
-fields.currency.addEventListener("change", updateCurrency);
-form.addEventListener("submit", calculate);
-
-loadFormData();
-updateCurrency();
-updateCalculationMode();
-
-
-function getCalculationHistory() {
-  try {
-    const saved = localStorage.getItem(HISTORY_KEY);
-    return saved ? JSON.parse(saved) : [];
-  } catch (error) {
-    return [];
-  }
-}
-
-
-
-function saveCalculationToHistory(result) {
-  const history = getCalculationHistory();
-  let updatedHistory;
-
-  if (editingHistoryId !== null) {
-    const index = history.findIndex(
-      (item) => item.id === editingHistoryId
-    );
-
-    if (index === -1) {
-      showError("Não foi possível encontrar o registo que estás a editar.");
-      return false;
-    }
-
-    updatedHistory = [...history];
-
-    updatedHistory[index] = {
-      ...result,
-      id: history[index].id,
-      date: history[index].date
-    };
-  } else {
-    updatedHistory = [
-      {
-        ...result,
-        id: Date.now().toString() + Math.random().toString(36).slice(2, 8),
-        date: new Date().toISOString()
-      },
-      ...history
-    ];
-  }
-
-  try {
-    localStorage.setItem(
-      HISTORY_KEY,
-      JSON.stringify(updatedHistory.slice(0, 50))
-    );
-  } catch (error) {
-    showError("Não foi possível guardar o cálculo no histórico.");
-    return false;
-  }
-
-  editingHistoryId = null;
-  renderHistory();
-
-  const submitButton = form.querySelector('button[type="submit"]');
-
-  if (submitButton) {
-    submitButton.textContent = "Calcular preço de venda";
-  }
-
-  return true;
-}
-
-
-function renderHistory() {
-  const history = getCalculationHistory();
-
-
-historyCount.textContent = String(history.length);
-
-const totalHistoryCost = history.reduce(
-  (sum, item) => sum + Number(item.totalCost || 0),
-  0
-);
-
-const totalHistoryProfit = history.reduce(
-  (sum, item) => sum + Number(item.totalProfit || 0),
-  0
-);
-
-historyTotalCost.textContent =
-  money.format(totalHistoryCost) + " MZN";
-
-historyTotalProfit.textContent =
-  money.format(totalHistoryProfit) + " MZN";
-
-
-  historyList.replaceChildren();
-
-  if (history.length === 0) {
-    const message = document.createElement("p");
-    message.textContent = "Ainda não existem cálculos guardados.";
-    historyList.appendChild(message);
-    return;
-  }
-
-  history.forEach((item) => {
-    const card = document.createElement("article");
-    card.className = "history-item";
-
-    const title = document.createElement("h3");
-    title.textContent = item.name || "Produto sem nome";
-
-    const date = document.createElement("p");
-    date.textContent = new Date(item.date).toLocaleString("pt-MZ");
-
-    const mode = document.createElement("p");
-    mode.textContent =
-      item.mode === "production" ? "Modo: Fabrico" : "Modo: Revenda";
-
-    const price = document.createElement("p");
-    price.textContent =
-      "Preço de venda unitário: " +
-      money.format(item.sellingPrice) + " MZN";
-
-    const cost = document.createElement("p");
-    cost.textContent =
-      "Custo total: " + money.format(item.totalCost) + " MZN";
-
-    const profit = document.createElement("p");
-    profit.textContent =
-      "Lucro total estimado: " + money.format(item.totalProfit) + " MZN";
-
-    const details = document.createElement("div");
-    details.hidden = true;
-
-    
-const quantity = document.createElement("p");
-quantity.textContent = "Quantidade: " + item.quantity;
-
-const totalCostDetail = document.createElement("p");
-totalCostDetail.textContent =
-  "Custo total de produção: " + money.format(item.totalCost) + " MZN";
-
-const unitCost = document.createElement("p");
-unitCost.textContent =
-  "Custo por unidade: " + money.format(item.unitCost) + " MZN";
-
-
-    const expenses = document.createElement("p");
-    expenses.textContent =
-      "Despesas adicionais: " + money.format(item.expenses) + " MZN";
-
-details.append(
-  quantity,
-  totalCostDetail,
-  unitCost,
-  expenses
-);
-
-
-    if (item.mode === "production") {
-      const labor = document.createElement("p");
-      labor.textContent =
-        "Mão de obra: " + money.format(item.laborCost || 0) + " MZN";
-
-      const productionExpenses = document.createElement("p");
-      productionExpenses.textContent =
-        "Outras despesas de produção: " +
-        money.format(item.productionExpenses || 0) + " MZN";
-
-      details.append(labor, productionExpenses);
-
-      
-if (Array.isArray(item.ingredientsDetails)) {
-  const ingredientsTotal = document.createElement("p");
-  ingredientsTotal.textContent =
-    "Total dos ingredientes: " +
-    money.format(
-      item.ingredientsDetails.reduce(
-        (sum, ingredient) => sum + Number(ingredient.costInMZN || 0),
-        0
-      )
-    ) + " MZN";
-
-  details.appendChild(ingredientsTotal);
-
-  const heading = document.createElement("h4");
-  heading.textContent = "Ingredientes e materiais";
-  details.appendChild(heading);
-
-
-        item.ingredientsDetails.forEach((ingredient) => {
-          const line = document.createElement("p");
-          line.textContent =
-            ingredient.name + ": " +
-            money.format(ingredient.cost) + " " +
-            ingredient.currency + " — " +
-            money.format(ingredient.costInMZN) + " MZN";
-          details.appendChild(line);
-        });
-      }
-    }
-
-    const toggleDetails = document.createElement("button");
-    toggleDetails.type = "button";
-    toggleDetails.textContent = "Ver detalhes";
-
-    toggleDetails.addEventListener("click", () => {
-      details.hidden = !details.hidden;
-      toggleDetails.textContent = details.hidden
-        ? "Ver detalhes"
-        : "Ocultar detalhes";
-    });
-
-    const editButton = document.createElement("button");
-editButton.type = "button";
-editButton.textContent = "Editar";
-
-editButton.addEventListener("click", () => {
-  loadCalculationForEditing(item);
-});
-
-    const deleteButton = document.createElement("button");
-    deleteButton.type = "button";
-    deleteButton.textContent = "Eliminar registo";
-
-    deleteButton.addEventListener("click", () => {
-      const updatedHistory = getCalculationHistory().filter(
-        (entry) => entry.id !== item.id
+      supabaseClient = window.supabase.createClient(
+        SUPABASE_URL,
+        SUPABASE_KEY
       );
 
-      localStorage.setItem(HISTORY_KEY, JSON.stringify(updatedHistory));
-      renderHistory();
-    });
+      const { data, error } = await supabaseClient.auth.getSession();
 
-    card.append(
-      title,
-      date,
-      mode,
-      price,
-      cost,
-      profit,
-      toggleDetails,
-      details,
-      editButton,
-      deleteButton
-    );
+      if (error) throw error;
 
-    historyList.appendChild(card);
-  });
-}
+      updateAuthUI(data.session?.user || null);
 
-function loadCalculationForEditing(item) {
-  editingHistoryId = item.id;
-
- // Preencher os campos principais
-fields.name.value = item.name || "";
-fields.mode.value = item.mode || "resale";
-
-// Atualizar primeiro a apresentação do formulário
-updateCalculationMode();
-
-fields.currency.value = item.currency || "MZN";
-fields.cost.value = item.originalCost ?? "";
-fields.exchangeRate.value = item.exchangeRate ?? 1;
-fields.quantity.value = item.quantity ?? "";
-fields.expenses.value = item.expenses ?? 0;
-fields.margin.value = item.margin ?? 40;
-
-updateCurrency();
-
-  // Preencher os campos específicos do fabrico
-  if (item.mode === "production") {
-    laborCostField.value = item.laborCost ?? 0;
-    productionExpensesField.value = item.productionExpenses ?? 0;
-
-    ingredientsList.replaceChildren();
-
-    if (
-      Array.isArray(item.ingredientsDetails) &&
-      item.ingredientsDetails.length > 0
-    ) {
-      item.ingredientsDetails.forEach((ingredient) => {
-        addIngredientRow();
-
-        const rows = ingredientsList.querySelectorAll(".ingredient-row");
-        const row = rows[rows.length - 1];
-
-        row.querySelector(".ingredient-name").value =
-          ingredient.name || "";
-
-        row.querySelector(".ingredient-cost").value =
-          ingredient.cost ?? "";
-
-        row.querySelector(".ingredient-currency").value =
-          ingredient.currency || "MZN";
-
-        row.querySelector(".ingredient-rate").value =
-          ingredient.exchangeRate ?? 1;
+      supabaseClient.auth.onAuthStateChange((_event, session) => {
+        updateAuthUI(session?.user || null);
       });
-    } else {
-      addIngredientRow();
+
+    } catch (error) {
+      console.error("Erro Supabase:", error);
+      message.textContent =
+        "Não foi possível ligar ao serviço de contas. Tenta novamente.";
     }
   }
 
-  // Mostrar o formulário e ocultar resultados anteriores
-  results.hidden = true;
-  clearError();
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
 
-  // Alterar o texto do botão de cálculo
-  const submitButton = form.querySelector('button[type="submit"]');
-
-  if (submitButton) {
-    submitButton.textContent = "Guardar alterações";
-  }
-
-  // Levar o utilizador até ao formulário
-  form.scrollIntoView({
-    behavior: "smooth",
-    block: "start"
-  });
-}
-
-clearHistoryButton.addEventListener("click", () => {
-  localStorage.removeItem(HISTORY_KEY);
-  renderHistory();
-});
-
-renderHistory();
-
-function exportHistoryToCSV() {
-  const history = getCalculationHistory();
-
-  if (history.length === 0) {
-    alert("Não existem cálculos no histórico para exportar.");
-    return;
-  }
-
-  const headers = [
-    "Data",
-    "Produto",
-    "Modo",
-    "Quantidade",
-    "Custo dos ingredientes (MZN)",
-    "Mão de obra (MZN)",
-    "Outras despesas (MZN)",
-    "Custo total (MZN)",
-    "Custo por unidade (MZN)",
-    "Preço de venda unitário (MZN)",
-    "Lucro por unidade (MZN)",
-    "Receita total (MZN)",
-    "Lucro total (MZN)"
-  ];
-
-  function csvCell(value) {
-    let text = String(value ?? "");
-
-    // Evitar que o Excel interprete texto como fórmula
-    if (/^[=+\-@\t\r]/.test(text)) {
-      text = "'" + text;
+    if (!supabaseClient) {
+      message.textContent =
+        "Serviço de contas indisponível. Verifica a internet.";
+      return;
     }
 
-    return '"' + text.replace(/"/g, '""') + '"';
-  }
+    const email = $("authEmail").value.trim();
+    const password = $("authPassword").value;
 
-  const rows = history.map((item) => {
-    const ingredientsTotal = Array.isArray(item.ingredientsDetails)
-      ? item.ingredientsDetails.reduce(
-          (sum, ingredient) =>
-            sum + Number(ingredient.costInMZN || 0),
-          0
-        )
-      : Number(item.ingredientCost || 0);
+    signInButton.disabled = true;
+    message.textContent = "A verificar os teus dados...";
 
-    return [
-      new Date(item.date).toLocaleString("pt-MZ"),
-      item.name || "Produto",
-      item.mode === "production" ? "Fabrico" : "Revenda",
-      item.quantity,
-      ingredientsTotal.toFixed(2),
-      Number(item.laborCost || 0).toFixed(2),
-      Number(item.productionExpenses || 0).toFixed(2),
-      Number(item.totalCost || 0).toFixed(2),
-      Number(item.unitCost || 0).toFixed(2),
-      Number(item.sellingPrice || 0).toFixed(2),
-      Number(item.unitProfit || 0).toFixed(2),
-      Number(item.totalRevenue || 0).toFixed(2),
-      Number(item.totalProfit || 0).toFixed(2)
-    ];
-  });
-
-  const csv = [
-    headers,
-    ...rows
-  ]
-    .map((row) => row.map(csvCell).join(";"))
-    .join("\r\n");
-
-  // BOM para facilitar a leitura de caracteres acentuados no Excel
-  const blob = new Blob(
-    ["\uFEFF" + csv],
-    { type: "text/csv;charset=utf-8;" }
-  );
-
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-
-  link.href = url;
-  link.download = "historico_quanto_devo_cobrar.csv";
-
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-
-  URL.revokeObjectURL(url);
-}
-
-exportHistoryButton.addEventListener(
-  "click",
-  exportHistoryToCSV
-);
-
-
-/* ========================================
-   AUTENTICAÇÃO COM SUPABASE
-======================================== */
-
-const authForm = document.getElementById("authForm");
-const authEmail = document.getElementById("authEmail");
-const authPassword = document.getElementById("authPassword");
-const authMessage = document.getElementById("authMessage");
-const signUpButton = document.getElementById("signUpButton");
-const loggedInArea = document.getElementById("loggedInArea");
-const loggedInEmail = document.getElementById("loggedInEmail");
-const signOutButton = document.getElementById("signOutButton");
-
-function showAuthMessage(message, isError = false) {
-    if (!authMessage) return;
-
-    authMessage.textContent = message;
-    authMessage.style.color = isError ? "#b42318" : "#18794e";
-}
-
-function updateAuthInterface(user) {
-    const authSection = document.getElementById("authSection");
-    const signInButton = document.getElementById("signInButton");
-
-    if (user) {
-        if (loggedInEmail) {
-            loggedInEmail.textContent = user.email || "";
-        }
-
-        if (loggedInArea) {
-            loggedInArea.hidden = false;
-        }
-
-        if (authForm) {
-            authForm.hidden = true;
-        }
-
-        showAuthMessage("Sessão iniciada com sucesso.");
-    } else {
-        if (loggedInArea) {
-            loggedInArea.hidden = true;
-        }
-
-        if (authForm) {
-            authForm.hidden = false;
-        }
-
-        if (signInButton) {
-            signInButton.disabled = false;
-        }
-
-        if (authSection) {
-            showAuthMessage("Inicia sessão ou cria uma conta.");
-        }
-    }
-}
-
-if (authForm && signUpButton && window.supabase) {
-    authForm.addEventListener("submit", async function (event) {
-        event.preventDefault();
-
-        const email = authEmail.value.trim();
-        const password = authPassword.value;
-
-        showAuthMessage("A iniciar sessão...");
-
-        const { data, error } = await supabaseClient.auth.signInWithPassword({
-            email,
-            password
+    try {
+      const { data, error } =
+        await supabaseClient.auth.signInWithPassword({
+          email,
+          password
         });
 
-        if (error) {
-            showAuthMessage(error.message, true);
-            return;
-        }
+      if (error) throw error;
 
-        updateAuthInterface(data.user);
-        authForm.reset();
-    });
+      message.textContent = "Sessão iniciada com sucesso.";
+      updateAuthUI(data.user);
 
-    signUpButton.addEventListener("click", async function () {
-        const email = authEmail.value.trim();
-        const password = authPassword.value;
+    } catch (error) {
+      console.error("Erro ao iniciar sessão:", error);
+      message.textContent = error.message ||
+        "Não foi possível iniciar sessão.";
 
-        if (!email || !password) {
-            showAuthMessage(
-                "Preenche o e-mail e a palavra-passe antes de criar a conta.",
-                true
-            );
-            return;
-        }
-
-        if (password.length < 8) {
-            showAuthMessage(
-                "A palavra-passe deve ter pelo menos 8 caracteres.",
-                true
-            );
-            return;
-        }
-
-        showAuthMessage("A criar conta...");
-
-        const { data, error } = await supabaseClient.auth.signUp({
-    email,
-    password,
-    options: {
-        emailRedirectTo: "https://olencia4.github.io/quanto-devo-cobrar/"
+    } finally {
+      signInButton.disabled = false;
     }
-});
+  });
 
-        if (error) {
-            showAuthMessage(error.message, true);
-            return;
-        }
-
-        if (data.session) {
-            updateAuthInterface(data.user);
-            authForm.reset();
-        } else {
-            showAuthMessage(
-                "Conta criada. Verifica o teu e-mail para confirmar a conta antes de iniciar sessão."
-            );
-        }
-    });
-
-    if (signOutButton) {
-        signOutButton.addEventListener("click", async function () {
-            const { error } = await supabaseClient.auth.signOut();
-
-            if (error) {
-                showAuthMessage(error.message, true);
-                return;
-            }
-
-            updateAuthInterface(null);
-            showAuthMessage("Sessão terminada.");
-        });
+  signUpButton.addEventListener("click", async () => {
+    if (!supabaseClient) {
+      message.textContent =
+        "Serviço de contas indisponível. Verifica a internet.";
+      return;
     }
 
-    supabaseClient.auth.getSession().then(({ data, error }) => {
-        if (error) {
-            showAuthMessage("Não foi possível verificar a sessão.", true);
-            return;
+    const email = $("authEmail").value.trim();
+    const password = $("authPassword").value;
+
+    if (!email || password.length < 8) {
+      message.textContent =
+        "Introduz um e-mail válido e uma palavra-passe com pelo menos 8 caracteres.";
+      return;
+    }
+
+    signUpButton.disabled = true;
+    message.textContent = "A criar a tua conta...";
+
+    try {
+      const { data, error } = await supabaseClient.auth.signUp({
+        email,
+        password,
+        options: {
+          emailRedirectTo: window.location.origin +
+            window.location.pathname
         }
+      });
 
-        updateAuthInterface(data.session?.user ?? null);
-    });
+      if (error) throw error;
 
-    supabaseClient.auth.onAuthStateChange((_event, session) => {
-        updateAuthInterface(session?.user ?? null);
-    });
+      if (data.session) {
+        message.textContent =
+          "Conta criada com sucesso. Já podes utilizar a aplicação.";
+        updateAuthUI(data.session.user);
+
+      } else if (data.user) {
+        message.textContent =
+          "Registo iniciado com sucesso! Verifica o teu e-mail e confirma a conta antes de iniciares sessão.";
+        updateAuthUI(null);
+
+      } else {
+        message.textContent =
+          "Não foi possível confirmar o registo. Tenta novamente.";
+      }
+
+    } catch (error) {
+      console.error("Erro ao criar conta:", error);
+      message.textContent =
+        error.message || "Ocorreu um erro ao criar a conta.";
+
+    } finally {
+      signUpButton.disabled = false;
+    }
+  });
+
+  $("signOutButton").addEventListener("click", async () => {
+    if (!supabaseClient) return;
+
+    try {
+      const { error } = await supabaseClient.auth.signOut();
+
+      if (error) throw error;
+
+      message.textContent = "Sessão terminada.";
+      updateAuthUI(null);
+
+    } catch (error) {
+      message.textContent =
+        error.message || "Não foi possível terminar a sessão.";
+    }
+  });
 }
+ function updateAuthUI(user){$("authForm").hidden=!!user;$("loggedInArea").hidden=!user;$("loggedInEmail").textContent=user?.email||"";$("accountToggle").textContent=user?"Conta ligada":"A minha conta";}
+
+  document.querySelectorAll(".mode-card").forEach(card=>card.addEventListener("click",()=>{fields.mode.value=card.dataset.mode;fields.mode.dispatchEvent(new Event("change"));}));
+  fields.mode.addEventListener("change",updateMode); fields.currency.addEventListener("change",updateCurrency);
+  fields.form.addEventListener("input",saveFormData);
+  $("addIngredientButton").addEventListener("click",()=>{addIngredientRow();saveFormData();});
+  fields.form.addEventListener("submit",event=>{event.preventDefault();hideError();try{const result=validateAndCalculate();saveCalculation(result);renderResult(result);editingHistoryId=null;$("resetButton").textContent="Fazer novo cálculo";saveFormData();}catch(error){showError(error.message||"Verifica os dados introduzidos.");}});
+  $("shareButton").addEventListener("click",shareResult); $("resetButton").addEventListener("click",resetForm);
+  $("clearHistoryButton").addEventListener("click",()=>{if(!history.length)return;if(confirm("Tens a certeza de que pretendes eliminar todo o histórico deste dispositivo?")){history=[];saveJSON(STORAGE_KEY,history);resetForm();renderHistory();}});
+  $("exportHistoryButton").addEventListener("click",exportHistory);
+  loadFormData(); if(!fields.ingredients.querySelector(".ingredient-row"))addIngredientRow(); updateMode();updateCurrency();renderHistory();setupAuth();
+})();
