@@ -4,7 +4,12 @@
   const SUPABASE_URL = "https://bndstqeslspkzmfinmia.supabase.co";
   const SUPABASE_KEY = "sb_publishable_NPjGuXeBFH0JwMF6lP--pg_HfEkVpaX";
   const STORAGE_KEY = "quantoDevoCobrar_history_v3";
-  const FORM_KEY = "quantoDevoCobrar_form_v3";
+const FORM_KEY = "quantoDevoCobrar_form_v3";
+
+const ANONYMOUS_STORAGE_KEY = "quantoDevoCobrar_history_anonymous_v1";
+const USER_STORAGE_PREFIX = "quantoDevoCobrar_history_user_";
+const PENDING_DELETE_PREFIX = "quantoDevoCobrar_pending_delete_";
+const PENDING_CLEAR_PREFIX = "quantoDevoCobrar_pending_clear_";
   const $ = (id) => document.getElementById(id);
   const fields = {
     form: $("priceForm"), name: $("productName"), mode: $("calculationMode"), currency: $("currency"),
@@ -13,13 +18,192 @@
     ingredients: $("ingredientsList"), labor: $("laborCost"), productionExpenses: $("productionExpenses")
   };
   const currencyNames = {MZN:"Metical",ZAR:"Rand",USD:"Dólar",EUR:"Euro",GBP:"Libra",CNY:"Yuan"};
-  let history = readJSON(STORAGE_KEY, []);
-  let editingHistoryId = null;
-  let latestResult = null;
-  let supabaseClient = null;
+ let history = readJSON(ANONYMOUS_STORAGE_KEY, null);
+
+if (!Array.isArray(history)) {
+  history = readJSON(STORAGE_KEY, []);
+  saveJSON(ANONYMOUS_STORAGE_KEY, history);
+}
+
+let editingHistoryId = null;
+let latestResult = null;
+let supabaseClient = null;
+let currentUserId = null;
 
   function readJSON(key, fallback) { try { const value = JSON.parse(localStorage.getItem(key)); return value ?? fallback; } catch { return fallback; } }
   function saveJSON(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch (error) { console.warn("Não foi possível guardar os dados localmente.", error); } }
+  function persistHistory() {
+  saveJSON(STORAGE_KEY, history);
+
+  if (currentUserId) {
+    saveJSON(USER_STORAGE_PREFIX + currentUserId, history);
+  } else {
+    saveJSON(ANONYMOUS_STORAGE_KEY, history);
+  }
+}
+
+function toSupabaseRow(item, userId) {
+  console.log("MODO ENVIADO AO SUPABASE:", item.mode);
+  return {
+    user_id: userId,
+    calculation_id: String(item.id),
+    product_name: item.name,
+    calculation_mode: ({
+  resale: "revenda",
+  production: "fabrico",
+  service: "servico"
+})[item.mode] || item.mode,
+    input_data: {
+      quantity: item.quantity,
+      margin: item.margin,
+      sourceCurrency: item.sourceCurrency,
+      exchangeRate: item.exchangeRate,
+      originalCost: item.originalCost,
+      expenses: item.expenses,
+      labor: item.labor,
+      directExpenses: item.directExpenses,
+      ingredients: item.ingredients
+    },
+    result_data: item,
+    created_at: item.date
+  };
+}
+
+async function saveCalculationToSupabase(item) {
+  if (!supabaseClient || !currentUserId) return;
+
+  try {
+    const { error } = await supabaseClient
+      .from("calculation_history")
+      .upsert(
+        toSupabaseRow(item, currentUserId),
+        { onConflict: "user_id,calculation_id" }
+      );
+
+    if (error) throw error;
+
+  } catch (error) {
+    console.error("Não foi possível sincronizar o cálculo:", error);
+  }
+}
+
+async function syncHistoryForUser(user) {
+  if (!supabaseClient || !user?.id) return;
+
+  const userId = user.id;
+  const userStorageKey = USER_STORAGE_PREFIX + userId;
+  const pendingDeleteKey = PENDING_DELETE_PREFIX + userId;
+  const pendingClearKey = PENDING_CLEAR_PREFIX + userId;
+
+  try {
+    // Carregar primeiro a cópia local desta conta.
+    const cachedHistory = readJSON(userStorageKey, []);
+    history = Array.isArray(cachedHistory) ? cachedHistory : [];
+
+    saveJSON(STORAGE_KEY, history);
+    renderHistory();
+
+    // Processar uma eliminação total que tenha ficado pendente.
+    if (readJSON(pendingClearKey, false)) {
+      const { error } = await supabaseClient
+        .from("calculation_history")
+        .delete()
+        .eq("user_id", userId);
+
+      if (error) throw error;
+
+      localStorage.removeItem(pendingClearKey);
+      localStorage.removeItem(pendingDeleteKey);
+    } else {
+      // Processar eliminações individuais pendentes.
+      const pendingIds = readJSON(pendingDeleteKey, []);
+
+      if (Array.isArray(pendingIds) && pendingIds.length) {
+        const { error } = await supabaseClient
+          .from("calculation_history")
+          .delete()
+          .eq("user_id", userId)
+          .in("calculation_id", pendingIds);
+
+        if (error) throw error;
+
+        localStorage.removeItem(pendingDeleteKey);
+      }
+    }
+
+    // Transferir os cálculos feitos antes de iniciar sessão.
+    const anonymousHistory = readJSON(ANONYMOUS_STORAGE_KEY, []);
+
+    if (Array.isArray(anonymousHistory) && anonymousHistory.length) {
+      const rows = anonymousHistory.map(item => toSupabaseRow(item, userId));
+
+      const { error } = await supabaseClient
+        .from("calculation_history")
+        .upsert(rows, {
+          onConflict: "user_id,calculation_id"
+        });
+
+      if (error) throw error;
+    }
+
+    // Recuperar o histórico guardado na conta.
+    const { data, error } = await supabaseClient
+      .from("calculation_history")
+      .select("calculation_id, product_name, calculation_mode, result_data, created_at")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+
+    history = (data || []).map(row => {
+      const result = row.result_data || {};
+
+      return {
+        ...result,
+        id: row.calculation_id || result.id,
+        name: result.name || row.product_name,
+        mode: result.mode || row.calculation_mode,
+        date: result.date || row.created_at
+      };
+    });
+
+    // Guardar a cópia local depois de confirmar a leitura remota.
+    saveJSON(userStorageKey, history);
+    saveJSON(STORAGE_KEY, history);
+
+    // Só limpar o histórico anónimo depois de a sincronização terminar.
+    if (Array.isArray(anonymousHistory) && anonymousHistory.length) {
+      saveJSON(ANONYMOUS_STORAGE_KEY, []);
+    }
+
+    renderHistory();
+
+    console.log("Histórico sincronizado com sucesso.");
+
+  } catch (error) {
+    console.error("Erro ao sincronizar o histórico:", error);
+    // Mantém os dados locais se a sincronização falhar.
+  }
+}
+
+async function handleAuthSession(session) {
+  const user = session?.user || null;
+  const nextUserId = user?.id || null;
+
+  if (nextUserId === currentUserId) return;
+
+  currentUserId = nextUserId;
+
+  if (user) {
+    await syncHistoryForUser(user);
+  } else {
+    history = readJSON(ANONYMOUS_STORAGE_KEY, []);
+    if (!Array.isArray(history)) history = [];
+
+    saveJSON(STORAGE_KEY, history);
+    renderHistory();
+  }
+}
   function number(value) { const parsed = Number(value); return Number.isFinite(parsed) ? parsed : 0; }
   function money(value) { return new Intl.NumberFormat("pt-MZ", {minimumFractionDigits:2, maximumFractionDigits:2}).format(number(value)) + " MT"; }
   function showError(message) { const box = $("formError"); box.textContent = message; box.hidden = !message; if (message) box.scrollIntoView({behavior:"smooth",block:"nearest"}); }
@@ -151,10 +335,21 @@
     $("results").scrollIntoView({behavior:"smooth",block:"start"});
   }
   function saveCalculation(result) {
-    const index=history.findIndex(item=>item.id===result.id);
-    if(index>=0) history[index]=result; else history.unshift(result);
-    saveJSON(STORAGE_KEY,history); renderHistory();
+  const index = history.findIndex(item => item.id === result.id);
+
+  if (index >= 0) {
+    history[index] = result;
+  } else {
+    history.unshift(result);
   }
+
+  persistHistory();
+  renderHistory();
+
+  if (currentUserId) {
+    void saveCalculationToSupabase(result);
+  }
+}
   function renderHistory() {
     $("historyCount").textContent=history.length;
     $("historyTotalCost").textContent=money(history.reduce((sum,item)=>sum+number(item.totalCosts),0));
@@ -220,57 +415,376 @@
     fields.ingredients.innerHTML=""; (item.ingredients?.length?item.ingredients:[{}]).forEach(ingredient=>addIngredientRow({name:ingredient.name,cost:ingredient.cost,currency:ingredient.currency,rate:ingredient.rate}));
     updateMode(); updateCurrency(); $("resetButton").textContent="Cancelar edição"; $("calculadora").scrollIntoView({behavior:"smooth"});
   }
-  function deleteCalculation(id){history=history.filter(item=>item.id!==id);saveJSON(STORAGE_KEY,history);if(editingHistoryId===id)resetForm();renderHistory();}
+ function deleteCalculation(id) {
+  history = history.filter(item => item.id !== id);
+  persistHistory();
+
+  if (editingHistoryId === id) resetForm();
+
+  renderHistory();
+
+  if (currentUserId) {
+  const userId = currentUserId;
+  const key = PENDING_DELETE_PREFIX + userId;
+    const pending = readJSON(key, []);
+
+    if (!pending.includes(String(id))) {
+      pending.push(String(id));
+      saveJSON(key, pending);
+    }
+
+    void (async () => {
+      try {
+        const { error } = await supabaseClient
+          .from("calculation_history")
+          .delete()
+          .eq("user_id", userId)
+          .eq("calculation_id", String(id));
+
+        if (error) throw error;
+
+        const remaining = readJSON(key, [])
+          .filter(item => item !== String(id));
+
+        if (remaining.length) {
+          saveJSON(key, remaining);
+        } else {
+          localStorage.removeItem(key);
+        }
+
+      } catch (error) {
+        console.error("A eliminação ficará pendente de sincronização:", error);
+      }
+    })();
+  }
+}
   function resetForm(){fields.form.reset();fields.mode.value="resale";fields.currency.value="MZN";fields.rate.value="1";fields.ingredients.innerHTML="";addIngredientRow();editingHistoryId=null;latestResult=null;$("resetButton").textContent="Fazer novo cálculo";$("resultContent").hidden=true;$("emptyResults").hidden=false;updateMode();updateCurrency();hideError();saveFormData();}
   function exportHistory(){if(!history.length){alert("Ainda não existem cálculos para exportar.");return;}const rows=[["Nome","Modo","Data","Quantidade","Custo total (MZN)","Preço unitário (MZN)","Lucro unitário (MZN)","Lucro total (MZN)","Margem (%)"],...history.map(item=>[item.name,modeLabel(item.mode),new Date(item.date).toLocaleString("pt-MZ"),item.quantity,item.totalCosts,item.sellingPrice,item.unitProfit,item.totalProfit,item.actualMargin])];const csv="\uFEFF"+rows.map(row=>row.map(value=>`"${String(value??"").replace(/"/g,'""')}"`).join(";")).join("\r\n");const blob=new Blob([csv],{type:"text/csv;charset=utf-8;"});const url=URL.createObjectURL(blob);const link=document.createElement("a");link.href=url;link.download="historico-quanto-devo-cobrar.csv";document.body.appendChild(link);link.click();link.remove();URL.revokeObjectURL(url);}
   async function shareResult(){if(!latestResult)return;const r=latestResult;const text=`QUANTO DEVO COBRAR?\nProduto/serviço: ${r.name}\nModo: ${modeLabel(r.mode)}\nPreço recomendado: ${money(r.sellingPrice)}\nCusto por unidade: ${money(r.unitCost)}\nLucro por unidade: ${money(r.unitProfit)}\nQuantidade: ${r.quantity}\nLucro total estimado: ${money(r.totalProfit)}`;try{if(navigator.share)await navigator.share({title:"Resultado | Quanto Devo Cobrar?",text});else if(navigator.clipboard?.writeText){await navigator.clipboard.writeText(text);$("resultNotice").textContent="Resultado copiado. Já podes colá-lo numa mensagem.";}else{$("resultNotice").textContent=text;}}catch(error){if(error.name!=="AbortError")$("resultNotice").textContent="Não foi possível partilhar automaticamente. Podes copiar os valores apresentados.";}}
 
+
+let passwordRecoveryMode = false;
+
+
+
+function updateAuthUI(user) {
+  const authForm = $("authForm");
+  const loggedInArea = $("loggedInArea");
+  const recoveryPanel = $("recoveryPanel");
+  const newPasswordPanel = $("newPasswordPanel");
+
+  if (passwordRecoveryMode) {
+    authForm.hidden = true;
+    loggedInArea.hidden = true;
+
+    if (recoveryPanel) recoveryPanel.hidden = true;
+    if (newPasswordPanel) newPasswordPanel.hidden = false;
+
+    $("accountToggle").textContent = "Nova palavra-passe";
+    return;
+  }
+
+  authForm.hidden = !!user;
+  loggedInArea.hidden = !user;
+
+  if (recoveryPanel) recoveryPanel.hidden = true;
+  if (newPasswordPanel) newPasswordPanel.hidden = true;
+
+  $("loggedInEmail").textContent = user?.email || "";
+
+  $("accountToggle").textContent = user
+    ? "Conta ligada"
+    : "A minha conta";
+}
+
+function authErrorMessage(error) {
+  const errorText = String(error?.message || "").toLowerCase();
+
+  if (errorText.includes("invalid login credentials")) {
+    return "E-mail ou palavra-passe incorrectos.";
+  }
+
+  if (errorText.includes("email not confirmed")) {
+    return "Confirma primeiro o teu endereço de e-mail.";
+  }
+
+  if (
+    errorText.includes("already registered") ||
+    errorText.includes("user already exists")
+  ) {
+    return "Este e-mail já tem uma conta. Experimenta iniciar sessão.";
+  }
+
+  if (errorText.includes("password should be at least")) {
+    return "A palavra-passe deve ter pelo menos 8 caracteres.";
+  }
+
+  if (
+    errorText.includes("rate limit") ||
+    errorText.includes("too many requests")
+  ) {
+    return "Foram feitas demasiadas tentativas. Aguarda alguns minutos.";
+  }
+
+  if (errorText.includes("network")) {
+    return "Problema de ligação. Verifica a tua internet.";
+  }
+
+  return error?.message || "Ocorreu um erro. Tenta novamente.";
+}
+
+function setupPasswordVisibility() {
+  document.querySelectorAll(".toggle-password").forEach(button => {
+    button.addEventListener("click", () => {
+      const input = document.getElementById(button.dataset.target);
+
+      if (!input) return;
+
+      const isHidden = input.type === "password";
+
+      input.type = isHidden ? "text" : "password";
+
+      button.setAttribute(
+        "aria-label",
+        isHidden ? "Esconder palavra-passe" : "Mostrar palavra-passe"
+      );
+
+      button.title = isHidden
+        ? "Esconder palavra-passe"
+        : "Mostrar palavra-passe";
+
+      button.classList.toggle("password-visible", isHidden);
+    });
+  });
+}
+
 async function setupAuth() {
   const form = $("authForm");
+
   if (!form) return;
 
   const message = $("authMessage");
   const signUpButton = $("signUpButton");
   const signInButton = $("signInButton");
+  const emailInput = $("authEmail");
+  const passwordInput = $("authPassword");
 
-  if (window.supabase?.createClient) {
-    try {
-      supabaseClient = window.supabase.createClient(
-        SUPABASE_URL,
-        SUPABASE_KEY
-      );
+  function showMessage(text, type = "info") {
+    message.textContent = text;
+    message.dataset.type = type;
+  }
 
-      const { data, error } = await supabaseClient.auth.getSession();
+  function setLoading(button, loading, text) {
+    button.disabled = loading;
 
-      if (error) throw error;
-
-      updateAuthUI(data.session?.user || null);
-
-      supabaseClient.auth.onAuthStateChange((_event, session) => {
-        updateAuthUI(session?.user || null);
-      });
-
-    } catch (error) {
-      console.error("Erro Supabase:", error);
-      message.textContent =
-        "Não foi possível ligar ao serviço de contas. Tenta novamente.";
+    if (loading) {
+      button.dataset.originalText = button.textContent;
+      button.textContent = text;
+    } else {
+      button.textContent = button.dataset.originalText || button.textContent;
     }
   }
 
+  if (!window.supabase?.createClient) {
+    showMessage("Não foi possível carregar o serviço de contas.");
+    return;
+  }
+
+  try {
+    supabaseClient = window.supabase.createClient(
+      SUPABASE_URL,
+      SUPABASE_KEY
+    );
+
+    const { data, error } = await supabaseClient.auth.getSession();
+
+if (error) throw error;
+
+updateAuthUI(data.session?.user || null);
+
+// Recuperar ou sincronizar o histórico da sessão actual.
+await handleAuthSession(data.session);
+
+supabaseClient.auth.onAuthStateChange((event, session) => {
+  if (event === "PASSWORD_RECOVERY") {
+    passwordRecoveryMode = true;
+
+    document.querySelector(".account-menu")?.setAttribute("open", "");
+  }
+
+  updateAuthUI(session?.user || null);
+
+  // Executar a sincronização fora do callback de autenticação.
+  setTimeout(() => {
+    void handleAuthSession(session);
+  }, 0);
+});
+
+  } catch (error) {
+    console.error("Erro ao ligar ao Supabase:", error);
+    showMessage("Não foi possível ligar ao serviço de contas. Tenta novamente.");
+    return;
+  }
+
+  // Criar a interface de recuperação de palavra-passe.
+  const recoveryPanel = document.createElement("div");
+  recoveryPanel.id = "recoveryPanel";
+  recoveryPanel.className = "auth-extra-panel";
+  recoveryPanel.hidden = true;
+
+  recoveryPanel.innerHTML = `
+    <h3>Recuperar palavra-passe</h3>
+    <p>Introduz o teu e-mail. Enviaremos um link para criares uma nova palavra-passe.</p>
+
+    <label for="recoveryEmail">E-mail</label>
+    <input
+      type="email"
+      id="recoveryEmail"
+      placeholder="teuemail@exemplo.com"
+      required
+    >
+
+    <div class="auth-buttons">
+      <button type="button" id="sendRecoveryButton">
+        Enviar link
+      </button>
+
+      <button type="button" id="cancelRecoveryButton">
+        Voltar
+      </button>
+    </div>
+
+    <p id="recoveryMessage" role="status" aria-live="polite"></p>
+  `;
+
+  form.insertAdjacentElement("afterend", recoveryPanel);
+
+  // Criar a interface para definir uma nova palavra-passe.
+  const newPasswordPanel = document.createElement("div");
+  newPasswordPanel.id = "newPasswordPanel";
+  newPasswordPanel.className = "auth-extra-panel";
+  newPasswordPanel.hidden = true;
+
+  newPasswordPanel.innerHTML = `
+    <h3>Definir nova palavra-passe</h3>
+    <p>Escolhe uma nova palavra-passe para a tua conta.</p>
+
+    <label for="newPassword">Nova palavra-passe</label>
+    <input
+      type="password"
+      id="newPassword"
+      minlength="8"
+      autocomplete="new-password"
+      placeholder="Mínimo de 8 caracteres"
+      required
+    >
+
+    <label for="confirmNewPassword">Confirmar palavra-passe</label>
+    <input
+      type="password"
+      id="confirmNewPassword"
+      minlength="8"
+      autocomplete="new-password"
+      placeholder="Repete a palavra-passe"
+      required
+    >
+
+    <button type="button" id="saveNewPasswordButton" class="primary-button">
+      Guardar nova palavra-passe
+    </button>
+
+    <p id="newPasswordMessage" role="status" aria-live="polite"></p>
+  `;
+
+  recoveryPanel.insertAdjacentElement("afterend", newPasswordPanel);
+
+if (passwordRecoveryMode) {
+  updateAuthUI(null);
+}
+
+  const recoveryEmail = $("recoveryEmail");
+  const recoveryMessage = $("recoveryMessage");
+  const sendRecoveryButton = $("sendRecoveryButton");
+
+  // Abrir recuperação de palavra-passe.
+  const forgotButton = document.createElement("button");
+  forgotButton.type = "button";
+  forgotButton.id = "forgotPasswordButton";
+  forgotButton.className = "auth-link-button";
+  forgotButton.textContent = "Esqueci-me da palavra-passe";
+
+  form.appendChild(forgotButton);
+
+  forgotButton.addEventListener("click", () => {
+    recoveryEmail.value = emailInput.value.trim();
+    recoveryPanel.hidden = false;
+    newPasswordPanel.hidden = true;
+    message.textContent = "";
+    recoveryMessage.textContent = "";
+
+    recoveryEmail.focus();
+  });
+
+  // Voltar ao formulário de início de sessão.
+  $("cancelRecoveryButton").addEventListener("click", () => {
+    recoveryPanel.hidden = true;
+    recoveryMessage.textContent = "";
+  });
+
+  // Enviar o e-mail de recuperação.
+  sendRecoveryButton.addEventListener("click", async () => {
+    const email = recoveryEmail.value.trim();
+
+    if (!email || !recoveryEmail.checkValidity()) {
+      recoveryMessage.textContent = "Introduz um endereço de e-mail válido.";
+      return;
+    }
+
+    setLoading(sendRecoveryButton, true, "A enviar...");
+
+    try {
+      const redirectUrl =
+        window.location.origin +
+        window.location.pathname +
+        "?type=recovery";
+
+      const { error } =
+        await supabaseClient.auth.resetPasswordForEmail(email, {
+          redirectTo: redirectUrl
+        });
+
+      if (error) throw error;
+
+      recoveryMessage.textContent =
+        "Se o e-mail estiver registado, receberás uma mensagem com o link de recuperação. Verifica também a pasta de spam.";
+
+    } catch (error) {
+      console.error("Erro na recuperação:", error);
+      recoveryMessage.textContent = authErrorMessage(error);
+
+    } finally {
+      setLoading(sendRecoveryButton, false);
+    }
+  });
+
+  // Iniciar sessão.
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
 
     if (!supabaseClient) {
-      message.textContent =
-        "Serviço de contas indisponível. Verifica a internet.";
+      showMessage("Serviço de contas indisponível.");
       return;
     }
 
-    const email = $("authEmail").value.trim();
-    const password = $("authPassword").value;
+    const email = emailInput.value.trim();
+    const password = passwordInput.value;
 
-    signInButton.disabled = true;
-    message.textContent = "A verificar os teus dados...";
+    if (!email || !password) {
+      showMessage("Preenche o e-mail e a palavra-passe.");
+      return;
+    }
+
+    setLoading(signInButton, true, "A verificar...");
 
     try {
       const { data, error } =
@@ -281,75 +795,132 @@ async function setupAuth() {
 
       if (error) throw error;
 
-      message.textContent = "Sessão iniciada com sucesso.";
+      showMessage("Sessão iniciada com sucesso.", "success");
       updateAuthUI(data.user);
 
     } catch (error) {
       console.error("Erro ao iniciar sessão:", error);
-      message.textContent = error.message ||
-        "Não foi possível iniciar sessão.";
+      showMessage(authErrorMessage(error), "error");
 
     } finally {
-      signInButton.disabled = false;
+      setLoading(signInButton, false);
     }
   });
 
+  // Criar conta.
   signUpButton.addEventListener("click", async () => {
     if (!supabaseClient) {
-      message.textContent =
-        "Serviço de contas indisponível. Verifica a internet.";
+      showMessage("Serviço de contas indisponível.");
       return;
     }
 
-    const email = $("authEmail").value.trim();
-    const password = $("authPassword").value;
+    const email = emailInput.value.trim();
+    const password = passwordInput.value;
 
-    if (!email || password.length < 8) {
-      message.textContent =
-        "Introduz um e-mail válido e uma palavra-passe com pelo menos 8 caracteres.";
+    if (!email || !emailInput.checkValidity()) {
+      showMessage("Introduz um endereço de e-mail válido.");
       return;
     }
 
-    signUpButton.disabled = true;
-    message.textContent = "A criar a tua conta...";
+    if (password.length < 8) {
+      showMessage("A palavra-passe deve ter pelo menos 8 caracteres.");
+      return;
+    }
+
+    setLoading(signUpButton, true, "A criar conta...");
 
     try {
+      const redirectUrl =
+  "https://olencia4.github.io/quanto-devo-cobrar/";
+
       const { data, error } = await supabaseClient.auth.signUp({
         email,
         password,
         options: {
-          emailRedirectTo: window.location.origin +
-            window.location.pathname
+          emailRedirectTo: redirectUrl
         }
       });
 
       if (error) throw error;
 
       if (data.session) {
-        message.textContent =
-          "Conta criada com sucesso. Já podes utilizar a aplicação.";
+        showMessage("Conta criada com sucesso.", "success");
         updateAuthUI(data.session.user);
 
-      } else if (data.user) {
-        message.textContent =
-          "Registo iniciado com sucesso! Verifica o teu e-mail e confirma a conta antes de iniciares sessão.";
-        updateAuthUI(null);
-
       } else {
-        message.textContent =
-          "Não foi possível confirmar o registo. Tenta novamente.";
+        showMessage(
+          "Registo recebido. Verifica o teu e-mail para confirmares a conta antes de iniciares sessão.",
+          "success"
+        );
       }
 
     } catch (error) {
       console.error("Erro ao criar conta:", error);
-      message.textContent =
-        error.message || "Ocorreu um erro ao criar a conta.";
+      showMessage(authErrorMessage(error), "error");
 
     } finally {
-      signUpButton.disabled = false;
+      setLoading(signUpButton, false);
     }
   });
 
+  // Guardar nova palavra-passe.
+  $("saveNewPasswordButton").addEventListener("click", async () => {
+    const newPassword = $("newPassword").value;
+    const confirmPassword = $("confirmNewPassword").value;
+    const saveButton = $("saveNewPasswordButton");
+    const newPasswordMessage = $("newPasswordMessage");
+
+    if (newPassword.length < 8) {
+      newPasswordMessage.textContent =
+        "A palavra-passe deve ter pelo menos 8 caracteres.";
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      newPasswordMessage.textContent =
+        "As palavras-passe não coincidem.";
+      return;
+    }
+
+    setLoading(saveButton, true, "A guardar...");
+
+    try {
+      const { error } = await supabaseClient.auth.updateUser({
+        password: newPassword
+      });
+
+      if (error) throw error;
+
+      await supabaseClient.auth.signOut();
+
+      passwordRecoveryMode = false;
+
+      window.history.replaceState(
+        {},
+        document.title,
+        window.location.pathname
+      );
+
+      updateAuthUI(null);
+
+      emailInput.value = recoveryEmail.value.trim();
+      passwordInput.value = "";
+
+      showMessage(
+        "Palavra-passe actualizada com sucesso. Já podes iniciar sessão.",
+        "success"
+      );
+
+    } catch (error) {
+      console.error("Erro ao actualizar palavra-passe:", error);
+      newPasswordMessage.textContent = authErrorMessage(error);
+
+    } finally {
+      setLoading(saveButton, false);
+    }
+  });
+
+  // Terminar sessão.
   $("signOutButton").addEventListener("click", async () => {
     if (!supabaseClient) return;
 
@@ -358,24 +929,63 @@ async function setupAuth() {
 
       if (error) throw error;
 
-      message.textContent = "Sessão terminada.";
+      showMessage("Sessão terminada com sucesso.", "success");
       updateAuthUI(null);
 
     } catch (error) {
-      message.textContent =
-        error.message || "Não foi possível terminar a sessão.";
+      showMessage(authErrorMessage(error), "error");
     }
   });
 }
- function updateAuthUI(user){$("authForm").hidden=!!user;$("loggedInArea").hidden=!user;$("loggedInEmail").textContent=user?.email||"";$("accountToggle").textContent=user?"Conta ligada":"A minha conta";}
-
   document.querySelectorAll(".mode-card").forEach(card=>card.addEventListener("click",()=>{fields.mode.value=card.dataset.mode;fields.mode.dispatchEvent(new Event("change"));}));
   fields.mode.addEventListener("change",updateMode); fields.currency.addEventListener("change",updateCurrency);
   fields.form.addEventListener("input",saveFormData);
   $("addIngredientButton").addEventListener("click",()=>{addIngredientRow();saveFormData();});
   fields.form.addEventListener("submit",event=>{event.preventDefault();hideError();try{const result=validateAndCalculate();saveCalculation(result);renderResult(result);editingHistoryId=null;$("resetButton").textContent="Fazer novo cálculo";saveFormData();}catch(error){showError(error.message||"Verifica os dados introduzidos.");}});
   $("shareButton").addEventListener("click",shareResult); $("resetButton").addEventListener("click",resetForm);
-  $("clearHistoryButton").addEventListener("click",()=>{if(!history.length)return;if(confirm("Tens a certeza de que pretendes eliminar todo o histórico deste dispositivo?")){history=[];saveJSON(STORAGE_KEY,history);resetForm();renderHistory();}});
+  $("clearHistoryButton").addEventListener("click", () => {
+  if (!history.length) return;
+
+  if (!confirm("Tens a certeza de que pretendes eliminar todo o teu histórico?")) {
+    return;
+  }
+
+  history = [];
+  persistHistory();
+
+  if (currentUserId) {
+    const userId = currentUserId;
+    const clearKey = PENDING_CLEAR_PREFIX + userId;
+
+    saveJSON(clearKey, true);
+
+    void (async () => {
+      try {
+        const { error } = await supabaseClient
+          .from("calculation_history")
+          .delete()
+          .eq("user_id", userId);
+
+        if (error) throw error;
+
+        localStorage.removeItem(clearKey);
+        localStorage.removeItem(PENDING_DELETE_PREFIX + userId);
+
+      } catch (error) {
+        console.error("A eliminação total ficará pendente de sincronização:", error);
+      }
+    })();
+  }
+
+  resetForm();
+  renderHistory();
+});
   $("exportHistoryButton").addEventListener("click",exportHistory);
-  loadFormData(); if(!fields.ingredients.querySelector(".ingredient-row"))addIngredientRow(); updateMode();updateCurrency();renderHistory();setupAuth();
+  loadFormData();
+if (!fields.ingredients.querySelector(".ingredient-row")) addIngredientRow();
+updateMode();
+updateCurrency();
+renderHistory();
+setupPasswordVisibility();
+setupAuth();
 })();
