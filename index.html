@@ -31,7 +31,31 @@
           <h2>A tua conta</h2><p>Inicia sessão para aceder à tua conta.</p>
           <form id="authForm">
             <label for="authEmail">E-mail</label><input type="email" id="authEmail" placeholder="teuemail@exemplo.com" required>
-            <label for="authPassword">Palavra-passe</label><input type="password" id="authPassword" placeholder="Mínimo de 8 caracteres" minlength="8" required>
+            <label for="authPassword">Palavra-passe</label>
+
+<div class="password-field">
+  <input
+    type="password"
+    id="authPassword"
+    placeholder="Mínimo de 8 caracteres"
+    minlength="8"
+    required
+    autocomplete="current-password"
+  >
+
+  <button
+    type="button"
+    class="toggle-password"
+    data-target="authPassword"
+    aria-label="Mostrar palavra-passe"
+    title="Mostrar palavra-passe"
+  >
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/>
+      <circle cx="12" cy="12" r="3"/>
+    </svg>
+  </button>
+</div>
             <div class="auth-buttons"><button type="submit" id="signInButton">Iniciar sessão</button><button type="button" id="signUpButton">Criar conta</button></div>
             <p id="authMessage" role="status" aria-live="polite"></p>
           </form>
@@ -96,7 +120,7 @@
             <div class="field"><label for="quantity">Quantidade de unidades ou serviços</label><input id="quantity" name="quantity" type="number" min="1" step="1" placeholder="Ex.: 12"><small>Quantidade total que vais vender ou executar.</small></div>
             <div class="field"><label for="expenses" id="expensesLabel">Despesas adicionais (MT)</label><input id="expenses" name="expenses" type="number" min="0" step="0.01" value="0"><small id="expensesHelp">Transporte, embalagens e outros custos.</small></div>
           </div>
-          <div class="field margin-field"><div class="label-line"><label for="margin">Margem de lucro pretendida</label><span class="percentage-unit">%</span></div><input id="margin" name="margin" type="number" min="0" max="99.99" step="0.01" value="40"><small>Percentagem do preço de venda que pretendes obter como lucro.</small></div>
+          <div class="field margin-field"><div class="label-line"><label for="margin">Inserir margem de lucro pretendida</label><span class="percentage-unit">%</span></div><input id="margin" name="margin" type="number" min="0" max="99.99" step="0.01" value="40"><small>Percentagem do preço de venda que pretendes obter como lucro.</small></div>
           <div id="formError" class="form-error" role="alert" hidden></div>
           <button type="submit" class="primary-button">Calcular preço de venda <span>→</span></button>
           <p class="privacy-note"><span>●</span> Os teus cálculos ficam guardados neste dispositivo.</p>

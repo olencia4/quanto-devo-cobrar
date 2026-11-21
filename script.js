@@ -208,7 +208,9 @@ async function handleAuthSession(session) {
   function money(value) { return new Intl.NumberFormat("pt-MZ", {minimumFractionDigits:2, maximumFractionDigits:2}).format(number(value)) + " MT"; }
   function showError(message) { const box = $("formError"); box.textContent = message; box.hidden = !message; if (message) box.scrollIntoView({behavior:"smooth",block:"nearest"}); }
   function hideError() { showError(""); }
-  function roundUpToCent(value) { return Math.ceil((value - 1e-10) * 100) / 100; }
+ function roundUpToWhole(value) {
+  return Math.ceil(value - 1e-10);
+}
   function getModeText(mode) {
     if (mode === "production") return {title:"Dados do fabrico",intro:"Usa este modo quando transformas ingredientes ou matérias-primas num produto. Regista apenas a quantidade efectivamente utilizada, a mão de obra e os custos de produção.",materials:"Ingredientes e materiais utilizados",description:"Indica o custo da quantidade de cada ingrediente ou material usada neste lote.",labor:"Mão de obra da produção (MT)",extra:"Energia, gás e outros custos de produção (MT)",expenses:"Outras despesas do lote (MT)"};
     if (mode === "service") return {title:"Dados do serviço",intro:"Usa este modo para calcular o preço de um trabalho ou serviço. Inclui materiais consumidos, mão de obra, deslocação e outras despesas. Para ferramentas reutilizáveis, considera apenas o custo proporcional ao serviço.",materials:"Materiais utilizados no serviço",description:"Adiciona os materiais consumidos neste trabalho. Se não utilizares materiais, podes deixar esta secção vazia.",labor:"Mão de obra do serviço (MT)",extra:"Deslocação e outros custos directos (MT)",expenses:"Despesas adicionais do serviço (MT)"};
@@ -311,7 +313,7 @@ async function handleAuthSession(session) {
     if (totalCosts<=0) throw new Error("O custo total deve ser superior a zero.");
     const unitCost=totalCosts/quantity;
     const exactPrice=unitCost/(1-margin/100);
-    const sellingPrice=roundUpToCent(exactPrice);
+    const sellingPrice = roundUpToWhole(exactPrice);
     const unitProfit=sellingPrice-unitCost;
     const totalRevenue=sellingPrice*quantity;
     const totalProfit=totalRevenue-totalCosts;
@@ -463,9 +465,9 @@ async function handleAuthSession(session) {
   async function shareResult(){if(!latestResult)return;const r=latestResult;const text=`QUANTO DEVO COBRAR?\nProduto/serviço: ${r.name}\nModo: ${modeLabel(r.mode)}\nPreço recomendado: ${money(r.sellingPrice)}\nCusto por unidade: ${money(r.unitCost)}\nLucro por unidade: ${money(r.unitProfit)}\nQuantidade: ${r.quantity}\nLucro total estimado: ${money(r.totalProfit)}`;try{if(navigator.share)await navigator.share({title:"Resultado | Quanto Devo Cobrar?",text});else if(navigator.clipboard?.writeText){await navigator.clipboard.writeText(text);$("resultNotice").textContent="Resultado copiado. Já podes colá-lo numa mensagem.";}else{$("resultNotice").textContent=text;}}catch(error){if(error.name!=="AbortError")$("resultNotice").textContent="Não foi possível partilhar automaticamente. Podes copiar os valores apresentados.";}}
 
 
-let passwordRecoveryMode = false;
-
-
+let passwordRecoveryMode =
+  window.location.hash.includes("type=recovery") ||
+  new URLSearchParams(window.location.search).get("type") === "recovery";
 
 function updateAuthUI(user) {
   const authForm = $("authForm");
@@ -794,9 +796,11 @@ if (passwordRecoveryMode) {
         });
 
       if (error) throw error;
+  showMessage("Sessão iniciada com sucesso.", "success");
 
-      showMessage("Sessão iniciada com sucesso.", "success");
-      updateAuthUI(data.user);
+  form.reset();
+
+  updateAuthUI(data.user);
 
     } catch (error) {
       console.error("Erro ao iniciar sessão:", error);
@@ -920,22 +924,45 @@ if (passwordRecoveryMode) {
     }
   });
 
+  
   // Terminar sessão.
   $("signOutButton").addEventListener("click", async () => {
     if (!supabaseClient) return;
+
+    const signOutButton = $("signOutButton");
+    signOutButton.disabled = true;
 
     try {
       const { error } = await supabaseClient.auth.signOut();
 
       if (error) throw error;
 
-      showMessage("Sessão terminada com sucesso.", "success");
+      // Limpar os campos de autenticação.
+      form.reset();
+
+      // Limpar mensagens anteriores.
+      showMessage("");
+
+      // Actualizar a interface.
       updateAuthUI(null);
 
+      // Voltar à calculadora.
+      $("calculadora").scrollIntoView({
+        behavior: "smooth",
+        block: "start"
+      });
+
+      showMessage("Sessão terminada com sucesso.", "success");
+
     } catch (error) {
+      console.error("Erro ao terminar sessão:", error);
       showMessage(authErrorMessage(error), "error");
+
+    } finally {
+      signOutButton.disabled = false;
     }
   });
+
 }
   document.querySelectorAll(".mode-card").forEach(card=>card.addEventListener("click",()=>{fields.mode.value=card.dataset.mode;fields.mode.dispatchEvent(new Event("change"));}));
   fields.mode.addEventListener("change",updateMode); fields.currency.addEventListener("change",updateCurrency);

@@ -205,6 +205,66 @@ body {
   margin-top: 9px !important;
 }
 
+/* RECUPERAÇÃO E ALTERAÇÃO DE PALAVRA-PASSE */
+
+.auth-extra-panel {
+  margin-top: 15px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.auth-extra-panel h3 {
+  font-size: 15px;
+  margin: 0 0 5px;
+}
+
+.auth-extra-panel p {
+  font-size: 11px;
+  color: var(--muted);
+  margin: 5px 0 12px;
+}
+
+.auth-extra-panel label {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  margin: 10px 0 5px;
+}
+
+.auth-extra-panel input {
+  width: 100%;
+  padding: 11px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+
+.auth-link-button {
+  display: block;
+  margin-top: 12px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--green-800);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.auth-link-button:hover {
+  text-decoration: underline;
+}
+
+.auth-extra-panel button:disabled,
+.auth-buttons button:disabled {
+  opacity: .6;
+  cursor: not-allowed;
+}
+
+#recoveryMessage,
+#newPasswordMessage {
+  margin-top: 10px;
+}
+
 /* CONTEÚDO GERAL */
 
 .container {
@@ -1650,4 +1710,51 @@ body {
     bottom: 13px;
     padding: 11px 14px;
   }
+}
+
+/* CAMPO DE PALAVRA-PASSE COM BOTÃO DE VISIBILIDADE */
+
+.password-field {
+  position: relative;
+  width: 100%;
+}
+
+.password-field input {
+  width: 100%;
+  padding-right: 45px !important;
+}
+
+.toggle-password {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.toggle-password svg {
+  width: 21px;
+  height: 21px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.toggle-password:hover {
+  color: var(--green-800);
+}
+
+.toggle-password.password-visible {
+  color: var(--green-800);
 }
